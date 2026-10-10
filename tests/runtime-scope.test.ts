@@ -1,52 +1,28 @@
 import { expect, it } from 'vitest';
 import { validateRuntimeScope } from '../src/server/runtime-scope.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
-import {
-  INTELLIGENCE_KEY_MISSING_LABEL,
-  setupStatus,
-} from '../src/server/platform-config.js';
-it('blocks unbound cross-Dot run and inspector routes before contacting Intelligence', () => {
+it('blocks unbound cross-Dot runs and every route the app does not use', () => {
   const store = new WorkspaceStore(':memory:', 'owner');
   const dot = store.dots()[0];
   store.bindThread('thread-a', dot.id, 'A');
-  expect(() =>
-    validateRuntimeScope(
-      new Request(`http://localhost/api/copilotkit/agent/${dot.id}/run`, {
-        method: 'POST',
-      }),
-      store,
-      { threadId: 'other-owner' },
-    ),
-  ).toThrow();
-  expect(() =>
-    validateRuntimeScope(
-      new Request('http://localhost/api/copilotkit/inspect/threads/foreign'),
-      store,
-      null,
-    ),
-  ).toThrow();
-  expect(() =>
-    validateRuntimeScope(
-      new Request(`http://localhost/api/copilotkit/agent/${dot.id}/run`, {
-        method: 'POST',
-      }),
-      store,
-      { threadId: 'thread-a' },
-    ),
+  const run =
+    (path: string, body: unknown, method = 'POST') =>
+    () =>
+      validateRuntimeScope(
+        new Request(`http://localhost/api/copilotkit${path}`, { method }),
+        store,
+        body,
+      );
+  expect(run(`/agent/${dot.id}/run`, { threadId: 'other-owner' })).toThrow();
+  expect(run('/inspect/threads/foreign', null, 'GET')).toThrow();
+  expect(run('/threads', null, 'GET')).toThrow();
+  expect(run(`/agent/${dot.id}/suggest`, { threadId: 'thread-a' })).toThrow();
+  expect(run(`/agent/${dot.id}/run`, { threadId: 'thread-a' })).not.toThrow();
+  expect(
+    run(`/agent/${dot.id}/connect`, { threadId: 'thread-a' }),
   ).not.toThrow();
+  expect(run('/info', null, 'GET')).not.toThrow();
   store.close();
-});
-it('reports setup honestly without a standalone agent fallback', () => {
-  const status = setupStatus({
-    baseUrl: '',
-    voiceName: 'marin',
-    slackUsers: [],
-    runtimeUrl: '',
-  });
-  expect(status.intelligence).toBe(false);
-  expect(status.voice).toBe(false);
-  expect(status.slack).toBe('not_configured');
-  expect(status.missing).toContain(INTELLIGENCE_KEY_MISSING_LABEL);
 });
 it('rejects stop scope bypasses and misleading prefixes while allowing canonical owned routes', () => {
   const store = new WorkspaceStore(':memory:', 'owner');
@@ -78,13 +54,6 @@ it('rejects stop scope bypasses and misleading prefixes while allowing canonical
       ),
       store,
       {},
-    ),
-  ).not.toThrow();
-  expect(() =>
-    validateRuntimeScope(
-      new Request('http://localhost/api/copilotkit/threads/bound/messages'),
-      store,
-      null,
     ),
   ).not.toThrow();
   store.close();

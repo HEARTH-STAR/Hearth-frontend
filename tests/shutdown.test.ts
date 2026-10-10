@@ -1,23 +1,16 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createShutdown } from '../src/server/shutdown.js';
 afterEach(() => vi.useRealTimers());
-it('waits for Channels and HTTP shutdown and handles repeated signals once', async () => {
+it('waits for storage and HTTP shutdown and handles repeated signals once', async () => {
   let finish!: () => void;
   const wait = new Promise<void>((resolve) => {
     finish = resolve;
   });
-  const stopRunner = vi.fn(),
-    stopPlatform = vi.fn(() => wait),
+  const stopPlatform = vi.fn(() => wait),
     closeServer = vi.fn(async () => {}),
     exit = vi.fn(),
     report = vi.fn();
-  const shutdown = createShutdown({
-    stopRunner,
-    stopPlatform,
-    closeServer,
-    exit,
-    report,
-  });
+  const shutdown = createShutdown({ stopPlatform, closeServer, exit, report });
   const first = shutdown();
   const second = shutdown();
   expect(first).toBe(second);
@@ -25,7 +18,6 @@ it('waits for Channels and HTTP shutdown and handles repeated signals once', asy
   expect(exit).not.toHaveBeenCalled();
   finish();
   await first;
-  expect(stopRunner).toHaveBeenCalledTimes(1);
   expect(stopPlatform).toHaveBeenCalledTimes(1);
   expect(closeServer).toHaveBeenCalledTimes(1);
   expect(exit).toHaveBeenCalledWith(0);
@@ -34,11 +26,10 @@ it('bounds a stuck shutdown and reports operation failures without stopping othe
   vi.useFakeTimers();
   const exit = vi.fn(),
     report = vi.fn(),
-    closeServer = vi.fn(async () => {});
-  const shutdown = createShutdown({
-    stopRunner: () => {
+    closeServer = vi.fn(async () => {
       throw new Error('secret');
-    },
+    });
+  const shutdown = createShutdown({
     stopPlatform: () => new Promise(() => {}),
     closeServer,
     exit,

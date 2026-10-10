@@ -1,694 +1,364 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Ban, Boxes, Check, FileText, RefreshCw, X } from 'lucide-react';
+import type {
+  ComputerActivity,
+  ComputerPermissions,
+  ComputerStatus,
+  WorkspaceFile,
+  WorkspaceListing,
+} from '../shared/computer-types';
+import { formatBytes } from '../shared/paths';
 import type { Dot } from '../shared/types';
-import type { ComputerAction, ComputerStatus } from '../shared/computer-types';
 import { api } from './api';
-
-type Screen = {
-  base64: string;
-  width: number;
-  height: number;
-  url: string;
-  capturedAt: number;
-};
-
-export function ComputerPanel({ dot }: { dot: Dot }) {
-  const [tab, setTab] = useState<'Browser' | 'Files' | 'Terminal' | 'Activity'>(
-    'Browser',
-  );
-  const [status, setStatus] = useState<ComputerStatus>();
-  const [screen, setScreen] = useState<Screen>();
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [url, setUrl] = useState('');
-  const [text, setText] = useState('');
-  const [key, setKey] = useState('Enter');
-  const [point, setPoint] = useState({ x: 0, y: 0 });
-  const [path, setPath] = useState('');
-  const [contents, setContents] = useState('');
-  const [command, setCommand] = useState('');
-  const [output, setOutput] = useState('');
-  const [outputError, setOutputError] = useState('');
-  const [screenError, setScreenError] = useState('');
-  const lifecycle = useRef({
-    active: false,
-    revision: 0,
-    busy: false,
-    loaded: false,
-    running: false,
-  });
-  const controller = useRef<AbortController | null>(null);
-  const base = `/dots/${encodeURIComponent(dot.id)}/computer`;
-  const refresh = useCallback(async () => {
-    const revision = lifecycle.current.revision;
-    const current = () =>
-      lifecycle.current.active && revision === lifecycle.current.revision;
-    try {
-      const next = await api<ComputerStatus>(
-        base,
-        'GET',
-        undefined,
-        controller.current?.signal,
-      );
-      if (!current()) return;
-      setStatus(next);
-      lifecycle.current.loaded = true;
-      lifecycle.current.running = next.state === 'running';
-      setError('');
-      if (
-        next.state === 'running' &&
-        next.permissions.browser &&
-        next.permissions.enabled
-      ) {
-        try {
-          const capture = await api<Screen>(
-            `${base}/actions`,
-            'POST',
-            { action: 'screenshot', input: {} },
-            controller.current?.signal,
-          );
-          if (current()) {
-            setScreen(capture);
-            setScreenError('');
-          }
-        } catch (cause) {
-          if (current()) {
-            setScreen(undefined);
-            setScreenError(
-              cause instanceof Error
-                ? cause.message
-                : 'Could not refresh the screen.',
-            );
-          }
-        }
-      } else {
-        setScreen(undefined);
-        setScreenError('');
-      }
-    } catch (cause) {
-      if (current()) {
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : 'Could not load the computer.',
-        );
-        setScreen(undefined);
-      }
-    }
-  }, [base]);
+import { FileTreeView } from './FileTreeView';
+type Tab = 'Files' | 'Terminal' | 'Activity';
+const time = (at: number) =>
+  new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+/** Polls while the panel is open and the tab is visible. */
+function usePoll(load: () => Promise<void>, ms: number, active = true) {
   useEffect(() => {
-    lifecycle.current.active = true;
-    controller.current = new AbortController();
-    let cancelled = false;
+    if (!active) return;
     let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      if (
-        !document.hidden &&
-        !lifecycle.current.busy &&
-        (!lifecycle.current.loaded || lifecycle.current.running)
-      )
-        await refresh();
-      if (!cancelled && lifecycle.current.active)
-        timer = setTimeout(() => void poll(), 4000);
+    let stopped = false;
+    const tick = async () => {
+      if (!document.hidden) await load();
+      if (!stopped) timer = setTimeout(() => void tick(), ms);
     };
-    void poll();
+    void tick();
     return () => {
-      cancelled = true;
-      lifecycle.current.active = false;
-      lifecycle.current.revision++;
-      controller.current?.abort();
+      stopped = true;
       clearTimeout(timer);
     };
-  }, [refresh]);
-  const run = async (
-    endpoint: string,
-    body: unknown = {},
-    method = 'POST',
-    showOutput = false,
-  ) => {
-    if (lifecycle.current.busy) return;
-    lifecycle.current.busy = true;
-    lifecycle.current.revision++;
-    setBusy(true);
-    setError('');
-    if (showOutput) setOutputError('');
+  }, [load, ms, active]);
+}
+export function ComputerPanel({
+  dot,
+  openFile,
+  turnsFinished,
+  onToggleMemory,
+  onClose,
+}: {
+  dot: Dot;
+  /** A file to show, e.g. one a tool row linked to. */
+  openFile?: { path: string; at: number };
+  /** Changes whenever a turn ends, so the file list refreshes right away. */
+  turnsFinished: number;
+  onToggleMemory: (allowed: boolean) => Promise<void>;
+  onClose: () => void;
+}) {
+  const base = `/dots/${encodeURIComponent(dot.id)}/computer`;
+  const [tab, setTab] = useState<Tab>('Files');
+  const [status, setStatus] = useState<ComputerStatus>();
+  const [error, setError] = useState('');
+  const [listing, setListing] = useState<WorkspaceListing>();
+  const [listingError, setListingError] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [file, setFile] = useState<WorkspaceFile>();
+  const [fileError, setFileError] = useState('');
+  const [busy, setBusy] = useState('');
+  const loadStatus = useCallback(async () => {
     try {
-      const result = await api<unknown>(
-        `${base}${endpoint}`,
-        method,
-        body,
-        controller.current?.signal,
-      );
-      if (!lifecycle.current.active) return;
-      if (showOutput)
-        setOutput(
-          typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-        );
-      await refresh();
-      return result;
+      setStatus(await api<ComputerStatus>(base));
+      setError('');
     } catch (cause) {
-      if (!lifecycle.current.active) return;
-      const message =
-        cause instanceof Error ? cause.message : 'Computer action failed.';
-      // Status polling clears the panel error, so keep output action failures
-      // next to the output they replace.
-      if (showOutput) {
-        setOutput('');
-        setOutputError(message);
-      } else setError(message);
+      setError(
+        cause instanceof Error ? cause.message : 'Computer unavailable.',
+      );
+    }
+  }, [base]);
+  const loadFiles = useCallback(async () => {
+    try {
+      setListing(await api<WorkspaceListing>(`${base}/files`));
+      setListingError('');
+    } catch (cause) {
+      setListingError(
+        cause instanceof Error ? cause.message : 'Could not list files.',
+      );
+    }
+  }, [base]);
+  usePoll(loadStatus, 4000);
+  usePoll(loadFiles, 5000, tab === 'Files');
+  useEffect(() => {
+    if (turnsFinished) {
+      void loadFiles();
+      void loadStatus();
+    }
+  }, [turnsFinished, loadFiles, loadStatus]);
+  useEffect(() => {
+    if (!openFile) return;
+    setTab('Files');
+    setSelected(openFile.path);
+  }, [openFile]);
+  useEffect(() => {
+    setFile(undefined);
+    setFileError('');
+    if (!selected) return;
+    let active = true;
+    void api<WorkspaceFile>(`${base}/file?path=${encodeURIComponent(selected)}`)
+      .then((next) => active && setFile(next))
+      .catch(
+        (cause) =>
+          active &&
+          setFileError(
+            cause instanceof Error ? cause.message : 'Could not open the file.',
+          ),
+      );
+    return () => {
+      active = false;
+    };
+  }, [base, selected, turnsFinished]);
+  const permission = async (key: keyof ComputerPermissions, value: boolean) => {
+    setBusy(key);
+    try {
+      await api(`${base}/permissions`, 'PATCH', { [key]: value });
+      await loadStatus();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save.');
     } finally {
-      lifecycle.current.busy = false;
-      if (lifecycle.current.active) setBusy(false);
+      setBusy('');
     }
   };
-  const action = (action: ComputerAction, input: unknown, showOutput = false) =>
-    run('/actions', { action, input }, 'POST', showOutput);
-  const running = status?.state === 'running' && status.permissions.enabled;
-  const human =
-    status?.control?.holder === 'human' && !status.control.transitioning;
-  const browser = !!running && !!status?.permissions.browser;
+  const spinUp = async () => {
+    setBusy('container');
+    setError('');
+    try {
+      await api(`${base}/container`, 'POST', {});
+      await loadStatus();
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'The container did not start.',
+      );
+    } finally {
+      setBusy('');
+    }
+  };
+  const running = status?.state === 'running';
+  const terminal =
+    status?.activity.filter((entry) => entry.tool === 'Bash') ?? [];
   return (
-    <section
-      className="computer-panel"
-      aria-label={`${dot.name}'s computer`}
-      aria-busy={busy}
-    >
-      {error && (
+    <aside className="computer" aria-label={`${dot.name}'s computer`}>
+      <header className="computer-head">
+        <h2>Computer</h2>
+        <button
+          className="icon-button"
+          aria-label="Close computer"
+          onClick={onClose}
+        >
+          <X size={17} />
+        </button>
+      </header>
+      <div className="computer-bar">
+        <div
+          className="computer-tabs"
+          role="tablist"
+          aria-label="Computer tools"
+        >
+          {(['Files', 'Terminal', 'Activity'] as const).map((name) => (
+            <button
+              key={name}
+              role="tab"
+              aria-selected={tab === name}
+              onClick={() => setTab(name)}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+        <span className={`run-state ${running ? 'on' : ''}`}>
+          {status ? (running ? 'Running' : 'Offline') : 'Checking'}
+        </span>
+      </div>
+      {(error || status?.error) && (
         <p className="computer-error" role="alert">
-          {error}
+          {error || status?.error}
         </p>
       )}
-      {!status ? (
-        <p role="status">
-          {error ? 'Computer status unavailable.' : 'Loading computer…'}
-        </p>
-      ) : (
-        <>
-          <div className="computer-status">
-            <strong>{status.state.replaceAll('_', ' ')}</strong>
-            {status.state !== 'running' && (
-              <button disabled={busy} onClick={() => void refresh()}>
-                Refresh
-              </button>
-            )}
-            <span>
-              {busy ? 'Working…' : human ? 'You have control' : 'Dot control'}
-            </span>
-          </div>
-          {!status.configured && (
-            <div className="computer-setup">
-              <h3>Connect a computer service</h3>
-              <p>
-                This Dot does not have a computer service configured. Configure
-                the server’s computer service URL and token, then restart. Each
-                Dot gets its own browser and workspace.
-              </p>
-              <a
-                href="https://github.com/CopilotKit/OpenDots/blob/main/docs/COMPUTERS.md"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Computer setup guide ↗
-              </a>
-            </div>
-          )}
-          {status.error && (
-            <p className="computer-error" role="alert">
-              {status.error}
-            </p>
-          )}
-          <div
-            className="computer-tool-tabs"
-            role="tablist"
-            aria-label="Computer tools"
-          >
-            {(['Browser', 'Files', 'Terminal', 'Activity'] as const).map(
-              (name) => (
-                <button
-                  role="tab"
-                  aria-selected={tab === name}
-                  key={name}
-                  onClick={() => setTab(name)}
-                >
-                  {name}
-                </button>
-              ),
-            )}
-          </div>
-          {status.configured && (
-            <>
-              <section
-                className="computer-section computer-browser"
-                hidden={tab !== 'Browser'}
-              >
-                {!status.permissions.browser && (
-                  <p>Enable Browser permission to use the screen.</p>
-                )}
-                <form
-                  className="computer-row"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void action('navigate', { url });
-                  }}
-                >
-                  <input
-                    type="url"
-                    aria-label="Browser URL"
-                    placeholder="https://example.com"
-                    value={url}
-                    onChange={(event) => setUrl(event.target.value)}
-                    required
-                    disabled={!browser || busy || human}
-                  />
-                  <button disabled={!browser || busy || human || !url.trim()}>
-                    Go
-                  </button>
-                </form>
-                {screenError && (
-                  <p className="computer-error" role="status">
-                    {screenError}
-                  </p>
-                )}
-                {screen ? (
-                  <>
-                    <div className="computer-current-url" title={screen.url}>
-                      {screen.url || 'Browser screen'}
-                    </div>
-                    <button
-                      className="computer-screen"
-                      aria-label={
-                        human
-                          ? 'Click a point on the computer screen'
-                          : 'Computer screen; take control to interact'
-                      }
-                      disabled={!browser || !human || busy}
-                      onClick={(event) => {
-                        const rect =
-                          event.currentTarget.getBoundingClientRect();
-                        void action('human_click', {
-                          x: Math.min(
-                            screen.width - 1,
-                            Math.max(
-                              0,
-                              Math.floor(
-                                ((event.clientX - rect.left) / rect.width) *
-                                  screen.width,
-                              ),
-                            ),
-                          ),
-                          y: Math.min(
-                            screen.height - 1,
-                            Math.max(
-                              0,
-                              Math.floor(
-                                ((event.clientY - rect.top) / rect.height) *
-                                  screen.height,
-                              ),
-                            ),
-                          ),
-                        });
-                      }}
-                    >
-                      <img
-                        src={`data:image/png;base64,${screen.base64}`}
-                        alt={`Live browser screen for ${dot.name}`}
-                      />
-                    </button>
-                    <small>
-                      Refreshed{' '}
-                      {new Date(screen.capturedAt).toLocaleTimeString()}. Screen
-                      updates while this panel is open.
-                    </small>
-                  </>
-                ) : (
-                  <p className="computer-screen-empty">
-                    {running && status.permissions.browser
-                      ? 'Waiting for the browser screen…'
-                      : 'Start the computer with Browser permission to see its screen.'}
-                  </p>
-                )}
-                <div className="computer-control-pill">
-                  <span>
-                    {human ? 'You have control' : `${dot.name} has control`}
-                  </span>
-                  <button
-                    disabled={
-                      (!human && !browser) ||
-                      busy ||
-                      status.control?.transitioning
-                    }
-                    onClick={() => void run(human ? '/release' : '/take')}
-                  >
-                    {human ? 'Return control' : 'Take over'}
-                  </button>
-                </div>
-                {status.control?.transitioning && (
-                  <p role="status">Transferring control…</p>
-                )}
-                {human && (
-                  <details className="computer-human">
-                    <summary>Keyboard & precise controls</summary>
-                    <p>
-                      Click the screen or enter coordinates below. Text goes
-                      directly to this browser, outside chat. Return control
-                      when finished.
-                    </p>
-                    <form
-                      className="computer-row"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void action('human_click', point);
-                      }}
-                    >
-                      <label>
-                        X
-                        <input
-                          type="number"
-                          min="0"
-                          max={screen ? screen.width - 1 : undefined}
-                          value={point.x}
-                          onChange={(event) =>
-                            setPoint({
-                              ...point,
-                              x: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                      <label>
-                        Y
-                        <input
-                          type="number"
-                          min="0"
-                          max={screen ? screen.height - 1 : undefined}
-                          value={point.y}
-                          onChange={(event) =>
-                            setPoint({
-                              ...point,
-                              y: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                      <button disabled={busy || !browser || !screen}>
-                        Click
-                      </button>
-                    </form>
-                    <form
-                      className="computer-row"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        const value = text;
-                        setText('');
-                        void action('human_type', { text: value });
-                      }}
-                    >
-                      <input
-                        type="password"
-                        aria-label="Text to type into computer"
-                        placeholder="Type into focused field"
-                        autoComplete="off"
-                        value={text}
-                        maxLength={20000}
-                        onChange={(event) => setText(event.target.value)}
-                      />
-                      <button disabled={busy || !browser || !text}>Type</button>
-                    </form>
-                    <form
-                      className="computer-row"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void action('human_key', { key });
-                      }}
-                    >
-                      <select
-                        aria-label="Key to press"
-                        value={key}
-                        onChange={(event) => setKey(event.target.value)}
-                      >
-                        {[
-                          'Enter',
-                          'Tab',
-                          'Escape',
-                          'Backspace',
-                          'ArrowUp',
-                          'ArrowDown',
-                          'ArrowLeft',
-                          'ArrowRight',
-                        ].map((name) => (
-                          <option key={name}>{name}</option>
-                        ))}
-                      </select>
-                      <button disabled={busy || !browser}>Press key</button>
-                    </form>
-                    <div className="computer-actions">
-                      <button
-                        disabled={busy || !browser}
-                        onClick={() =>
-                          void action('human_scroll', { deltaY: -500 })
-                        }
-                      >
-                        Scroll up
-                      </button>
-                      <button
-                        disabled={busy || !browser}
-                        onClick={() =>
-                          void action('human_scroll', { deltaY: 500 })
-                        }
-                      >
-                        Scroll down
-                      </button>
-                    </div>
-                  </details>
-                )}
-              </section>
-              <details
-                className="computer-section"
-                open
-                hidden={tab !== 'Files'}
-              >
-                <summary>Workspace files</summary>
-                <p>Paths are relative to this Dot’s persistent workspace.</p>
-                <label>
-                  Path
-                  <input
-                    value={path}
-                    onChange={(event) => setPath(event.target.value)}
-                    placeholder="notes.txt"
-                    disabled={!running || !status.permissions.files || busy}
-                  />
-                </label>
-                <div className="computer-actions">
-                  <button
-                    disabled={!running || !status.permissions.files || busy}
-                    onClick={() => void action('files_list', { path }, true)}
-                  >
-                    List files
-                  </button>
-                  <button
-                    disabled={
-                      !running ||
-                      !status.permissions.files ||
-                      busy ||
-                      !path.trim()
-                    }
-                    onClick={() =>
-                      void action('files_read', { path }, true).then(
-                        (result) => {
-                          if (
-                            lifecycle.current.active &&
-                            result &&
-                            typeof result === 'object' &&
-                            'text' in result &&
-                            typeof result.text === 'string'
-                          )
-                            setContents(result.text);
-                        },
-                      )
-                    }
-                  >
-                    Read file
-                  </button>
-                </div>
-                <label>
-                  File contents
-                  <textarea
-                    aria-label="File contents to save"
-                    value={contents}
-                    onChange={(event) => setContents(event.target.value)}
-                    disabled={!running || !status.permissions.files || busy}
-                    maxLength={100000}
-                    rows={5}
-                  />
-                </label>
-                <button
-                  disabled={
-                    !running ||
-                    !status.permissions.files ||
-                    busy ||
-                    !path.trim()
-                  }
-                  onClick={() =>
-                    void action('files_write', { path, contents }, true)
-                  }
-                >
-                  Save file (replace contents)
-                </button>
-                {!status.permissions.files && (
-                  <p>
-                    Enable Workspace files permission to use these controls.
-                  </p>
-                )}
-              </details>
-              <details
-                className="computer-section"
-                open
-                hidden={tab !== 'Terminal'}
-              >
-                <summary>Terminal</summary>
-                <p>
-                  Runs inside this Dot’s computer. Commands stop after 30
-                  seconds.
+      <div className="computer-body">
+        {tab === 'Files' && (
+          <section className="computer-files" aria-label="Files">
+            <div className="files-tree">
+              {listing?.files.length ? (
+                <FileTreeView
+                  files={listing.files}
+                  selected={selected}
+                  onSelect={setSelected}
+                />
+              ) : (
+                <p className="computer-empty">
+                  {listingError ||
+                    (listing
+                      ? `No files yet. Ask ${dot.name} to save something and it appears here.`
+                      : 'Loading files…')}
                 </p>
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void action('exec', { command, timeoutMs: 30000 }, true);
-                  }}
-                >
-                  <textarea
-                    aria-label="Terminal command"
-                    value={command}
-                    onChange={(event) => setCommand(event.target.value)}
-                    maxLength={8000}
-                    rows={3}
-                    disabled={!running || !status.permissions.shell || busy}
-                    placeholder="pwd"
-                  />
+              )}
+              {listing?.truncated && (
+                <p className="computer-hint">Showing the first 5,000 files.</p>
+              )}
+            </div>
+            {selected && (
+              <div className="file-view">
+                <div className="file-view-head">
+                  <FileText size={14} aria-hidden="true" />
+                  <span title={selected}>{selected}</span>
+                  {file && <small>{formatBytes(file.size)}</small>}
                   <button
-                    disabled={
-                      !running ||
-                      !status.permissions.shell ||
-                      busy ||
-                      !command.trim()
-                    }
+                    className="icon-button"
+                    aria-label="Close file"
+                    onClick={() => setSelected(null)}
                   >
-                    Run command
+                    <X size={14} />
                   </button>
-                </form>
-                {!status.permissions.shell && (
-                  <p>Enable Terminal commands permission to run commands.</p>
+                </div>
+                {fileError ? (
+                  <p className="computer-error">{fileError}</p>
+                ) : !file ? (
+                  <p className="computer-empty">Opening…</p>
+                ) : file.binary ? (
+                  <p className="computer-empty">
+                    This is a binary file ({formatBytes(file.size)}).
+                  </p>
+                ) : (
+                  <pre tabIndex={0}>
+                    {file.text}
+                    {file.truncated && '\n…'}
+                  </pre>
                 )}
-              </details>
-              {(output || outputError) &&
-                (tab === 'Files' || tab === 'Terminal') && (
-                  <section className="computer-section">
-                    <h3>Output</h3>
-                    {outputError && (
-                      <p className="computer-error" role="alert">
-                        {outputError}
-                      </p>
-                    )}
-                    {output && <pre tabIndex={0}>{output}</pre>}
-                    <button
-                      onClick={() => {
-                        setOutput('');
-                        setOutputError('');
-                      }}
-                    >
-                      Clear output
-                    </button>
-                  </section>
-                )}
-            </>
-          )}
-          <details
-            className="computer-section"
-            open
-            hidden={tab !== 'Activity'}
-          >
-            <summary>Recent activity</summary>
-            {status.audit.length ? (
-              <ol className="computer-audit">
-                {status.audit
-                  .slice(-30)
-                  .reverse()
-                  .map((entry) => (
-                    <li key={entry.id}>
-                      <strong>{entry.action.replaceAll('_', ' ')}</strong>
-                      <span>
-                        {entry.actor} · {entry.outcome} ·{' '}
-                        {new Date(entry.createdAt).toLocaleTimeString()}
-                      </span>
-                    </li>
-                  ))}
+              </div>
+            )}
+          </section>
+        )}
+        {tab === 'Terminal' && (
+          <section className="computer-terminal" aria-label="Terminal">
+            {terminal.length ? (
+              [...terminal].reverse().map((entry) => (
+                <div
+                  className={`terminal-entry ${entry.outcome}`}
+                  key={entry.id}
+                >
+                  <div className="terminal-command">
+                    <span>$</span> {entry.summary}
+                  </div>
+                  {entry.detail && <pre>{terminalOutput(entry)}</pre>}
+                </div>
+              ))
+            ) : (
+              <p className="terminal-empty">
+                {status?.permissions.shell
+                  ? `Commands ${dot.name} runs show up here.`
+                  : `Shell is off. Turn it on below to let ${dot.name} run commands.`}
+              </p>
+            )}
+          </section>
+        )}
+        {tab === 'Activity' && (
+          <section aria-label="Activity">
+            {status?.activity.length ? (
+              <ol className="activity-list">
+                {status.activity.map((entry) => (
+                  <li key={entry.id} className={entry.outcome}>
+                    <span className="activity-mark">
+                      {entry.outcome === 'denied' ? (
+                        <Ban size={12} />
+                      ) : entry.outcome === 'succeeded' ? (
+                        <Check size={12} />
+                      ) : (
+                        <span className="activity-dot" />
+                      )}
+                    </span>
+                    <span className="activity-text">
+                      <strong>{entry.tool}</strong>
+                      <span title={entry.summary}>{entry.summary}</span>
+                    </span>
+                    <time>{time(entry.createdAt)}</time>
+                  </li>
+                ))}
               </ol>
             ) : (
-              <p>No computer actions yet.</p>
+              <p className="computer-empty">No activity yet.</p>
             )}
-          </details>
-          <details className="computer-settings">
-            <summary>Computer settings</summary>{' '}
-            <details
-              className="computer-permissions"
-              open={!status.permissions.enabled}
+          </section>
+        )}
+      </div>
+      <div className="computer-note">
+        <p>
+          {dot.name}’s files live in{' '}
+          <code>{status?.directory ?? dot.directory}</code> on Hearth-Core and
+          persist between conversations.
+        </p>
+        {status?.container ? (
+          <span className="container-pill" title={status.container.image ?? ''}>
+            <Boxes size={13} aria-hidden="true" /> {status.container.name} ·{' '}
+            {status.container.status}
+          </span>
+        ) : (
+          <button
+            disabled={!!busy}
+            onClick={() => void spinUp()}
+            title="Spin up a container for this Dot through Hearth-backend. The first one builds the image, which can take a few minutes."
+          >
+            {busy === 'container' ? (
+              <>
+                <RefreshCw size={13} className="spinning" /> Spinning up…
+              </>
+            ) : (
+              <>
+                <Boxes size={13} /> Spin up container
+              </>
+            )}
+          </button>
+        )}
+      </div>
+      <div className="computer-perms">
+        <span>Permissions</span>
+        <div>
+          {(['files', 'shell'] as const).map((key) => (
+            <button
+              key={key}
+              className="chip"
+              aria-pressed={!!status?.permissions[key]}
+              disabled={!status || !!busy}
+              title={
+                key === 'files'
+                  ? 'Create and edit files in its folder'
+                  : 'Run commands (the Hearth-Core policy still blocks network tools, sudo and git remotes)'
+              }
+              onClick={() => void permission(key, !status?.permissions[key])}
             >
-              <summary>Computer permissions</summary>
-              <p>
-                Choose what {dot.name} and the computer controls can access.
-              </p>
-              {(['enabled', 'browser', 'files', 'shell'] as const).map(
-                (permission) => (
-                  <label key={permission}>
-                    <input
-                      type="checkbox"
-                      checked={status.permissions[permission]}
-                      disabled={busy || !status.configured}
-                      onChange={(event) =>
-                        void run(
-                          '/permissions',
-                          { [permission]: event.target.checked },
-                          'PATCH',
-                        )
-                      }
-                    />
-                    {
-                      {
-                        enabled: 'Enable this computer',
-                        browser: 'Browser',
-                        files: 'Workspace files',
-                        shell: 'Terminal commands',
-                      }[permission]
-                    }
-                  </label>
-                ),
-              )}
-            </details>
-            <div className="computer-actions">
-              <button
-                disabled={
-                  busy ||
-                  !status.configured ||
-                  !status.permissions.enabled ||
-                  status.state === 'running'
-                }
-                onClick={() => void run('/start')}
-              >
-                Start computer
-              </button>
-              <button
-                disabled={busy || status.state !== 'running'}
-                onClick={() => void run('/stop')}
-              >
-                Stop computer
-              </button>
-            </div>
-            <p className="computer-hint">
-              Stopping retains this Dot’s workspace files. Browser sessions may
-              require signing in again.
-            </p>
-          </details>
-        </>
-      )}
-    </section>
+              {key === 'files' ? 'Files' : 'Shell'}
+            </button>
+          ))}
+          <button
+            className="chip"
+            aria-pressed={dot.memoryAllowed}
+            disabled={!!busy}
+            title="Include your saved memories in its turns"
+            onClick={async () => {
+              setBusy('memory');
+              try {
+                await onToggleMemory(!dot.memoryAllowed);
+              } finally {
+                setBusy('');
+              }
+            }}
+          >
+            Memory
+          </button>
+        </div>
+      </div>
+    </aside>
   );
+}
+function terminalOutput(entry: ComputerActivity) {
+  if (!entry.detail) return '';
+  try {
+    const value = JSON.parse(entry.detail) as {
+      stdout?: string;
+      stderr?: string;
+    };
+    return (
+      [value.stdout, value.stderr].filter(Boolean).join('\n') || entry.detail
+    );
+  } catch {
+    return entry.detail;
+  }
 }

@@ -1,17 +1,31 @@
-# Contributing to OpenDots
+# Contributing to Hearth-frontend
 
-OpenDots is an application template in early development. Focus changes on Spaces, Specialist Dots, text and calls, Slack, and inspectable background work. Keep the documented SDK integrations functional and report missing configuration clearly.
+## Setup
 
-For bugs, include the app mode, Node version, steps to reproduce, expected behavior, and actual behavior. Remove credentials and private page content from logs or screenshots.
+```bash
+npm ci
+cp .env.example .env
+npm run dev        # API on 127.0.0.1:4310, app on http://127.0.0.1:5173
+```
 
-For features, describe the user workflow before proposing an implementation. Clearly separate functioning integrations from sample fixtures and planned work. Do not add controls that appear to connect a service when no adapter exists.
+Requires Node.js 24. Conversations need Hearth-Core (`../Hearth-Core`); containers need Hearth-backend
+(`../Hearth-backend`) and Docker.
 
-Before opening a pull request:
+## Rules
 
-- Add regression coverage for changes to durable jobs, permissions, cancellation, or API behavior.
-- Run the repository's formatter, lint, typecheck, tests, and production build.
-- Exercise changed UI behavior and check narrow-screen layouts and keyboard access.
-- Update setup instructions if configuration or dependencies change.
-- Keep credentials, local databases, generated test reports, and internal planning notes out of commits.
+1. The browser talks only to this server. Hearth-Core and Hearth-backend are reached from `src/server`.
+2. Every Space, Dot, conversation and file operation is authorized on the server, not in the client.
+3. A tool Claude Code can call is either run here (page tools) or handed to the owner (`handoff`), and has a
+   row in `ToolRow.tsx`.
+4. Tests fake both services with `tests/helpers.ts`; nothing calls a model, Docker or the network.
+5. Check narrow screens (390px wide, no horizontal scroll) and dark mode when changing the UI.
 
-Project code is MIT licensed. Preserve applicable notices for any third-party code or assets you contribute.
+## Before a pull request
+
+Run `npm run format`, `npm run lint`, `npm run typecheck`, `npm test` and `npm run build`. Keep credentials,
+local databases (`data/`) and test reports out of commits.
+
+## Upstream
+
+This repository is a fork of [CopilotKit/OpenDots](https://github.com/CopilotKit/OpenDots), remote `upstream`.
+Its code is MIT licensed; keep the `LICENSE` notice.

@@ -1,109 +1,93 @@
-import { ComputerService } from './computer-service.js';
-import { ConnectionService } from './connections.js';
-import { PageService } from './page-service.js';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import type { AbstractAgent } from '@ag-ui/client';
 import {
-  CopilotKitIntelligence,
   CopilotRuntime,
   createCopilotHonoHandler,
   type CopilotHonoApp,
 } from '@copilotkit/runtime/v2';
-import { createSlackChannel } from './slack-channel.js';
-export { slackIdentity } from './slack-channel.js';
+import { SqliteAgentRunner } from '@copilotkit/sqlite-runner';
+import { ComputerService } from './computer-service.js';
+import type { HearthConfig } from './config.js';
+import { HearthAgent } from './hearth-agent.js';
+import { HearthBackend } from './hearth-backend.js';
+import { HearthCore } from './hearth-core.js';
+import { PageService } from './page-service.js';
+import { validateRuntimeScope } from './runtime-scope.js';
+import { ServiceMonitor } from './service-status.js';
 import { Store } from './store.js';
 import { WorkspaceStore } from './workspace.js';
-import { DotAgent } from './dot-agent.js';
-import { runThreadTurn } from './headless.js';
-import {
-  INTELLIGENCE_KEY_MISSING_LABEL,
-  setupStatus,
-  type PlatformConfig,
-} from './platform-config.js';
-import { validateRuntimeScope } from './runtime-scope.js';
-import { learningSelector } from './learning.js';
-import { SetupTelemetry } from './setup-telemetry.js';
+/**
+ * The runner records ``is_running`` per conversation in its database. A run cut short by a restart
+ * (``npm run dev`` restarts on every save) would leave its conversation "already running" for good,
+ * and no run survives a restart, so the flags are cleared before the runner opens the file.
+ */
+export function clearInterruptedRuns(path: string) {
+  if (path === ':memory:' || !existsSync(path)) return;
+  const db = new DatabaseSync(path);
+  try {
+    const table = db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='run_state'",
+      )
+      .get();
+    if (table)
+      db.exec(
+        'UPDATE run_state SET is_running=0, current_run_id=NULL WHERE is_running=1',
+      );
+  } finally {
+    db.close();
+  }
+}
+export interface PlatformOptions {
+  /** SQLite file for conversation history (AG-UI run events); ``:memory:`` in tests. */
+  threadsDatabase: string;
+  core?: HearthCore;
+  backend?: HearthBackend;
+}
+/**
+ * Everything behind ``/api``: the CopilotKit runtime (SSE mode, no Intelligence) whose agents are
+ * one HearthAgent per Dot, Hearth-Core and Hearth-backend clients, and the computer and page services.
+ */
 export class Platform {
-  private channelStartupFailed = false;
-  readonly setupTelemetry: SetupTelemetry;
-  readonly pages: PageService;
+  readonly core: HearthCore;
+  readonly backend: HearthBackend;
+  readonly monitor: ServiceMonitor;
   readonly computers: ComputerService;
-  readonly connections: ConnectionService;
-  readonly intelligence?: CopilotKitIntelligence;
-  readonly handler?: CopilotHonoApp;
+  readonly pages: PageService;
+  readonly handler: CopilotHonoApp;
+  private runner: SqliteAgentRunner;
   constructor(
     readonly store: Store,
     readonly workspace: WorkspaceStore,
-    readonly config: PlatformConfig,
+    readonly config: HearthConfig,
+    options: PlatformOptions,
   ) {
-    this.setupTelemetry = new SetupTelemetry(store);
+    this.core = options.core ?? new HearthCore(config.coreUrl);
+    this.backend =
+      options.backend ??
+      new HearthBackend(config.backendUrl, config.backendToken);
+    this.monitor = new ServiceMonitor(this.core, this.backend);
     this.computers = new ComputerService(
       workspace,
+      this.core,
+      this.backend,
+      this.monitor,
       config,
-      () => store.settings().paused,
     );
-    this.connections = new ConnectionService(workspace.connections);
-    this.pages = new PageService(workspace, () => {
-      this.requireReady();
-      return this.intelligence!;
-    });
-    if (!config.intelligenceKey) return;
-    this.intelligence = new CopilotKitIntelligence({
-      apiKey: config.intelligenceKey,
-      apiUrl: config.intelligenceApiUrl,
-      wsUrl: config.intelligenceWsUrl,
-      getLearningContainerId: learningSelector(
-        workspace,
-        config.slackDotId ?? workspace.dots()[0]?.id,
-      ),
-    });
-    const channels = [];
-    if (config.slackChannel && config.slackTeam && config.slackUsers.length) {
-      const dotId = config.slackDotId ?? workspace.dots()[0].id;
-      if (!workspace.dot(dotId))
-        throw new Error('SLACK_DOT_ID does not identify an existing Dot.');
-      const slack = createSlackChannel({
-        name: config.slackChannel,
-        config,
-        ownerId: workspace.ownerId,
-        paused: () => store.settings().paused,
-        agent: () =>
-          new DotAgent(
-            store,
-            workspace,
-            config,
-            dotId,
-            true,
-            this.setupTelemetry,
-          ),
-      });
-      channels.push(slack);
-    }
+    this.pages = new PageService(workspace);
+    clearInterruptedRuns(options.threadsDatabase);
+    this.runner = new SqliteAgentRunner({ dbPath: options.threadsDatabase });
+    const deps = { store, workspace, core: this.core, config };
     const runtime = new CopilotRuntime({
-      intelligence: this.intelligence,
-      telemetryId: this.setupTelemetry.identity,
-      telemetryProperties: this.setupTelemetry.metadata,
-      identifyUser: async () => ({
-        id: workspace.ownerId,
-        name: 'OpenDots owner',
-      }),
-      agents: async () =>
+      runner: this.runner,
+      agents: () =>
         Object.fromEntries(
           workspace
             .dots()
-            .map((dot) => [
-              dot.id,
-              new DotAgent(
-                store,
-                workspace,
-                config,
-                dot.id,
-                false,
-                this.setupTelemetry,
-              ),
-            ]),
-        ),
-      channels,
-      generateThreadNames: true,
+            .map((dot) => [dot.id, new HearthAgent(deps, dot.id)]),
+        ) as Record<string, AbstractAgent> & { [key: string]: AbstractAgent },
     });
     this.handler = createCopilotHonoHandler({
       runtime,
@@ -112,82 +96,13 @@ export class Platform {
     });
   }
   setup() {
-    return setupStatus(
-      this.config,
-      this.handler?.channels?.status().overall ??
-        (this.config.slackChannel ? 'setup_required' : 'not_configured'),
-      this.channelStartupFailed,
-    );
+    return this.monitor.status();
   }
-  requireReady() {
-    const missing = this.setup().missing;
-    if (missing.length)
-      throw new Error(
-        `Setup required: ${missing.join(', ')}. Conversations require CopilotKit Intelligence.`,
-      );
-  }
-  async start() {
-    this.setupTelemetry.start();
-    if (this.handler?.channels) {
-      try {
-        await this.handler.channels.ready({ timeoutMs: 15000 });
-        this.channelStartupFailed = false;
-      } catch (error) {
-        this.channelStartupFailed = true;
-        this.setupTelemetry.capture({
-          kind: 'setup_failed',
-          step: 'settings',
-          error_class: 'channel_start_failed',
-        });
-        throw error;
-      }
-    }
-  }
-  async stop() {
-    await this.setupTelemetry.stop();
-    await this.handler?.channels?.stop();
-  }
-  async createConversation(dotId: string, title: string) {
-    this.requireReady();
+  createConversation(dotId: string, title: string) {
     if (!this.workspace.dot(dotId)) throw new Error('Dot not found.');
-    const id = randomUUID();
-    try {
-      await this.intelligence!.createThread({
-        threadId: id,
-        userId: this.workspace.ownerId,
-        agentId: dotId,
-        name: title,
-      });
-    } catch {
-      throw new Error(
-        'Intelligence could not create this conversation. Check the runtime key and connection.',
-      );
-    }
-    return this.workspace.bindThread(id, dotId, title);
-  }
-  async history(threadId: string): Promise<string> {
-    this.requireReady();
-    this.workspace.requireThread(threadId);
-    const history = await this.intelligence!.getThreadMessages({
-      threadId,
-      userId: this.workspace.ownerId,
-    });
-    return history.messages
-      .filter((message) => ['user', 'assistant'].includes(message.role))
-      .slice(-12)
-      .map(
-        (message) =>
-          `${message.role}: ${typeof message.content === 'string' ? message.content : ''}`,
-      )
-      .join('\n')
-      .slice(-12000);
+    return this.workspace.bindThread(randomUUID(), dotId, title);
   }
   async handle(request: Request): Promise<Response> {
-    if (!this.handler)
-      return Response.json(
-        { error: `Setup required: ${INTELLIGENCE_KEY_MISSING_LABEL}.` },
-        { status: 503 },
-      );
     let body: unknown;
     if (request.method !== 'GET' && request.method !== 'HEAD')
       body = await request
@@ -209,24 +124,7 @@ export class Platform {
     }
     return this.handler.fetch(request);
   }
-  async turn(
-    threadId: string,
-    prompt: string,
-    signal: AbortSignal,
-    metadata?: Record<string, unknown>,
-  ): Promise<string> {
-    this.requireReady();
-    const thread = this.workspace.requireThread(threadId);
-    return runThreadTurn(
-      this.config.runtimeUrl,
-      this.config.ownerToken
-        ? { Authorization: `Bearer ${this.config.ownerToken}` }
-        : {},
-      thread.dotId,
-      threadId,
-      prompt,
-      signal,
-      metadata,
-    );
+  stop() {
+    this.runner.close();
   }
 }

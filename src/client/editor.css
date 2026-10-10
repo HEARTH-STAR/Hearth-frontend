@@ -15,15 +15,6 @@
   white-space: nowrap;
   border: 0;
 }
-.template-app .topbar {
-  gap: 16px;
-}
-.template-app .breadcrumbs {
-  flex: 1;
-}
-.desktop-nav-toggle {
-  flex-shrink: 0;
-}
 .document-icon {
   width: 40px;
   height: 40px;
@@ -839,25 +830,17 @@
   font-weight: 500;
   color: #5b6c4e;
 }
-.document-chat-panel .chat-persona {
-  padding: 18px;
+.document-chat-panel .chat {
+  min-height: 0;
 }
-.document-chat-panel .chat-transcript {
-  padding: 20px;
+.document-chat-panel .dot-header {
+  padding: 10px 14px;
 }
-.document-chat-panel .chat-welcome h1 {
-  font-size: 28px;
+.document-chat-panel .chat-column {
+  padding: 16px 14px;
 }
-.document-chat-panel .chat-composer {
-  margin: 12px;
-}
-.document-chat-panel .chat-persona-actions {
-  gap: 2px;
-}
-.document-chat-panel .chat-persona-actions .icon-button {
-  width: 32px;
-  height: 32px;
-  padding: 0;
+.document-chat-panel .chat-dock {
+  padding: 6px 12px 12px;
 }
 .document-outline {
   width: 205px;
@@ -969,14 +952,6 @@
 .saving-spinner {
   animation: saving-spin 1s linear infinite;
 }
-@media (min-width: 701px) {
-  .template-app.nav-collapsed .sidebar {
-    display: none;
-  }
-  .template-app.nav-collapsed .workspace {
-    margin-left: 0;
-  }
-}
 @media (max-width: 1150px) {
   .library-pages.grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1034,9 +1009,6 @@
   }
 }
 @media (max-width: 700px) {
-  .desktop-nav-toggle {
-    display: none;
-  }
   .space-library {
     padding: 35px 23px;
   }
@@ -1160,66 +1132,4 @@
   .library-page-card {
     transition: none;
   }
-}
-/* Keep application chrome readable beside the quieter document surface. */
-.template-app .template-label {
-  font-size: 9px;
-  line-height: 1.5;
-  letter-spacing: 0.8px;
-  color: #646c60;
-}
-.template-app .nav-label,
-.template-app .spaces-heading,
-.template-app .thread-list .nav-label {
-  font-size: 10px;
-  color: #646b61;
-}
-.template-app .space-title,
-.template-app .space-open {
-  color: #535f4e;
-}
-.template-app .dot-nav {
-  color: #58634f;
-  font-size: 12px;
-}
-.template-app .sidebar-empty,
-.template-app .sidebar-error {
-  color: #646d5d;
-  font-size: 11px;
-  line-height: 1.6;
-}
-.template-app .sidebar-bottom .nav-item {
-  color: #58634f;
-}
-.template-app .new-chat.nav-item {
-  color: #53634d;
-}
-.template-app .version {
-  color: #65705d;
-  font-size: 9px;
-}
-.template-app .mode-badge {
-  color: #53614f;
-  background: #eff2ec;
-  font-size: 9px;
-}
-.template-app .breadcrumbs,
-.template-app .breadcrumbs > span {
-  color: #636d5b;
-}
-.template-app .thread-row {
-  color: #5e6a54;
-}
-.template-app .thread-row small,
-.template-app .sidebar small {
-  color: #64705a;
-}
-.template-app .nav-item small {
-  background: #edf1e7;
-  color: #526249;
-}
-.template-app .pause-button,
-.template-app .pause-button > span {
-  color: #53624d;
-  font-size: 11px;
 }

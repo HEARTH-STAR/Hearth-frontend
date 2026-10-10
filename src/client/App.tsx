@@ -1,53 +1,24 @@
 import { openPageLink } from './page-navigation';
-import { SpaceNav } from './SpaceNav';
 import { SpaceWorkspace } from './SpaceWorkspace';
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
-import {
-  ArrowUp,
-  ArrowUpRight,
-  BookOpen,
-  Clock3,
-  Code2,
-  Folder,
-  Menu,
-  MessageCircle,
-  Monitor,
-  MoreHorizontal,
-  Pause,
-  PanelLeft,
-  Play,
-  Plus,
-  Search,
-  Settings2,
-  Trash2,
-  X,
-} from 'lucide-react';
-import type {
-  Conversation,
-  Detail,
-  Dot,
-  Result,
-  State,
-  WorkspaceState,
-} from '../shared/types';
+import { ArrowUpRight, Menu, Monitor, MoreHorizontal, X } from 'lucide-react';
+import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
-import { trackSetupStep } from './setup-telemetry';
 import {
-  applyCaptureResult,
   applyRefreshResult,
   dismissNotice,
   visibleNotice,
   type Notices,
 } from './poll-notice';
 import { Mascot } from './Mascot';
-import { Chat } from './Chat';
-import { ThreadList } from './ThreadList';
-import { ResultPane } from './ResultPane';
-import { TaskRow } from './TaskPresentation';
-import { TaskActions } from './TaskActions';
-import { WorkspaceDialog, type Dialog } from './WorkspaceDialog';
-import { submitComposerOnEnter } from './chat-composer';
+import { Chat, Composer } from './Chat';
+import { ComputerPanel } from './ComputerPanel';
+import { ConversationMenu } from './ConversationMenu';
+import { DotHeader } from './DotHeader';
+import { MemoryView } from './MemoryView';
+import { latestConversation, Sidebar } from './Sidebar';
+import { dotPayload, WorkspaceDialog, type Dialog } from './WorkspaceDialog';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -56,15 +27,17 @@ function describeFailure(error: unknown, fallback: string) {
     message: error instanceof Error ? error.message : fallback,
   };
 }
-
+const STARTERS = [
+  'Summarize what is in your folder',
+  'Draft notes I can review before saving',
+  'Make a plan I can follow',
+];
 export function App() {
   const [state, setState] = useState<State>();
   const [workspace, setWorkspace] = useState<WorkspaceState>();
   const [selectedDot, setSelectedDot] = useState('');
   const [selectedThread, setSelectedThread] = useState<string>();
-  const [view, rawSetView] = useState<'chat' | 'tasks' | 'memories' | 'space'>(
-    'chat',
-  );
+  const [view, rawSetView] = useState<'chat' | 'memory' | 'space'>('chat');
   const dirtyPage = useRef(false);
   const [spaceId, setSpaceId] = useState('');
   const [pageId, setPageId] = useState<string>();
@@ -73,11 +46,12 @@ export function App() {
   }, []);
   const setView = (next: typeof view) => {
     if (dirtyPage.current && !window.confirm('Leave your unsaved page draft?'))
-      return;
+      return false;
     dirtyPage.current = false;
     if (next !== 'space')
       history.replaceState(null, '', location.pathname + location.search);
     rawSetView(next);
+    return true;
   };
   useEffect(() => {
     let acceptedHash = location.hash;
@@ -108,7 +82,6 @@ export function App() {
   const openPage = (space: string, page?: string) => {
     openPageLink(`#/spaces/${space}${page ? `/pages/${page}` : ''}`);
   };
-
   const [notices, setNotices] = useState<Notices>({
     refresh: '',
     capture: '',
@@ -123,14 +96,17 @@ export function App() {
   const [needsAuth, setNeedsAuth] = useState(false);
   const [dialog, setDialog] = useState<Dialog>();
   const [mobile, setMobile] = useState(false);
-  const [navCollapsed, setNavCollapsed] = useState(false);
-  const [pane, setPane] = useState(false);
-  const [capture, setCapture] = useState<Result>();
+  // Beside the conversation on wide screens; on narrow ones it covers it, so it starts closed.
+  const [computerOpen, setComputerOpen] = useState(
+    () => window.matchMedia('(min-width: 1101px)').matches,
+  );
+  const [openFile, setOpenFile] = useState<{ path: string; at: number }>();
+  const [turnsFinished, setTurnsFinished] = useState(0);
   const [prompt, setPrompt] = useState('');
   const [pendingPrompt, setPendingPrompt] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
-  const [taskDetail, setTaskDetail] = useState<Detail>();
+  const loaded = useRef(false);
   const refresh = useCallback(async () => {
     try {
       const [s, w] = await Promise.all([
@@ -140,7 +116,14 @@ export function App() {
       setState(s);
       setWorkspace(w);
       setNeedsAuth(false);
-      setSelectedDot((previous) => previous || w.dots[0]?.id || '');
+      if (!loaded.current && w.dots[0]) {
+        // Open where the owner left off: the first Dot's latest conversation.
+        loaded.current = true;
+        setSelectedDot(w.dots[0].id);
+        setSelectedThread(
+          latestConversation(w.conversations, w.dots[0].id)?.id,
+        );
+      }
       setNotices((current) => applyRefreshResult(current, { ok: true }));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setNeedsAuth(true);
@@ -157,81 +140,54 @@ export function App() {
     const timer = setInterval(() => void refresh(), 3000);
     return () => clearInterval(timer);
   }, [refresh]);
-  useEffect(() => {
-    setCapture(undefined);
-    if (!selectedThread) return;
-    let active = true;
-    const load = () =>
-      void api<Result | null>(`/conversations/${selectedThread}/capture`)
-        .then((result) => {
-          if (!active) return;
-          setCapture(result ?? undefined);
-          setNotices((current) => applyCaptureResult(current, { ok: true }));
-        })
-        .catch((e) => {
-          if (!active) return;
-          setNotices((current) =>
-            applyCaptureResult(
-              current,
-              describeFailure(e, 'Could not connect to the server.'),
-            ),
-          );
-        });
-    load();
-    const timer = setInterval(load, 3000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [selectedThread]);
   const mutate = async (path: string, method: string, body?: unknown) => {
     setError('');
     try {
       await api(path, method, body);
       await refresh();
-      if (taskDetail)
-        setTaskDetail(await api<Detail>(`/tasks/${taskDetail.task.id}`));
       return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save.');
       return false;
     }
   };
+  const turnFinished = useCallback(() => setTurnsFinished((n) => n + 1), []);
+  const showFile = useCallback((path: string) => {
+    setComputerOpen(true);
+    setOpenFile({ path, at: Date.now() });
+  }, []);
   const dot =
     workspace?.dots.find((item) => item.id === selectedDot) ??
     workspace?.dots[0];
   const thread = workspace?.conversations.find(
     (item) => item.id === selectedThread && item.dotId === dot?.id,
   );
-  const configured = !!workspace && workspace.setup.missing.length === 0;
-  const setupStep = workspace
-    ? dialog?.type === 'settings'
-      ? 'settings'
-      : configured
-        ? 'ready'
-        : 'setup_required'
-    : undefined;
-  useEffect(() => {
-    if (!setupStep) return;
-    return trackSetupStep(setupStep);
-  }, [setupStep]);
+  const online = !!workspace?.setup.core.reachable;
   const chooseDot = (next: Dot) => {
+    if (!setView('chat')) return;
     setSelectedDot(next.id);
     setSelectedThread(
-      workspace?.conversations.find((item) => item.dotId === next.id)?.id,
+      workspace
+        ? latestConversation(workspace.conversations, next.id)?.id
+        : undefined,
     );
-    setView('chat');
     setMobile(false);
     setPendingPrompt(undefined);
   };
   const newConversation = async (text?: string) => {
-    if (!dot || !configured || busy) return;
+    if (!dot || busy) return;
+    if (!text) {
+      if (!setView('chat')) return;
+      setSelectedThread(undefined);
+      setMobile(false);
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       const next = await api<Conversation>('/conversations', 'POST', {
         dotId: dot.id,
-        title: text?.slice(0, 80) || 'A new thought',
+        title: text.slice(0, 80),
       });
       await refresh();
       setSelectedThread(next.id);
@@ -252,9 +208,7 @@ export function App() {
       <main className="unlock">
         <Mascot />
         <h1>Your own little corner.</h1>
-        <p>
-          Enter the owner access token configured on this template’s server.
-        </p>
+        <p>Enter the owner access token configured on this Hearth server.</p>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
@@ -280,7 +234,7 @@ export function App() {
             onChange={(e) => setAuth(e.target.value)}
             required
           />
-          <button className="primary">Unlock OpenDots</button>
+          <button className="primary">Unlock Hearth</button>
         </form>
         {error && (
           <p className="chat-error" role="alert">
@@ -303,437 +257,185 @@ export function App() {
         )}
       </main>
     );
-  const content = (
-    <div className={`app template-app ${navCollapsed ? 'nav-collapsed' : ''}`}>
-      <nav className="icon-rail" aria-label="Workspace navigation">
+  const paused = state.settings.paused;
+  const dotConversations = workspace.conversations.filter(
+    (item) => item.dotId === dot.id,
+  );
+  const conversationMenu = (
+    <ConversationMenu
+      conversations={dotConversations}
+      selected={thread?.id}
+      onSelect={(id) => setSelectedThread(id)}
+      onNew={() => void newConversation()}
+    />
+  );
+  const showComputer = view === 'chat' && computerOpen;
+  return (
+    <CopilotKitProvider runtimeUrl="/api/copilotkit" headers={authHeaders()}>
+      <div className={`hearth-app ${showComputer ? 'with-computer' : ''}`}>
         <button
-          className="rail-brand"
-          aria-label="OpenDots home"
-          onClick={() => {
-            setView('chat');
-            setSelectedThread(undefined);
-          }}
+          className="mobile-menu icon-button"
+          aria-label="Open navigation"
+          aria-expanded={mobile}
+          aria-controls="workspace-sidebar"
+          onClick={() => setMobile(true)}
         >
-          o<span>·</span>
+          <Menu size={20} />
         </button>
-        <button
-          aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          onClick={() => setNavCollapsed(!navCollapsed)}
-        >
-          <PanelLeft size={18} />
-        </button>
-        <button
-          aria-label="New chat"
-          disabled={!configured}
-          onClick={() => void newConversation()}
-        >
-          <Plus size={19} />
-        </button>
-        <button
-          aria-label="Open Spaces"
-          onClick={() => {
-            if (workspace.spaces[0]) openPage(workspace.spaces[0].id);
-          }}
-        >
-          <Folder size={18} />
-        </button>
-        <button aria-label="Open activity" onClick={() => setView('tasks')}>
-          <Clock3 size={18} />
-        </button>
-        <button
-          className="rail-settings"
-          aria-label="Open settings"
-          onClick={() => setDialog({ type: 'settings' })}
-        >
-          <Settings2 size={18} />
-        </button>
-      </nav>
-      <button
-        className="mobile-menu icon-button"
-        aria-label="Open navigation"
-        aria-expanded={mobile}
-        aria-controls="workspace-sidebar"
-        onClick={() => setMobile(true)}
-      >
-        <Menu size={21} />
-      </button>
-      {mobile && (
-        <button
-          className="nav-scrim"
-          aria-label="Close navigation"
-          onClick={() => setMobile(false)}
-        />
-      )}
-      <aside
-        id="workspace-sidebar"
-        className={`sidebar ${mobile ? 'open' : ''}`}
-      >
-        <button
-          className="wordmark"
-          onClick={() => {
-            setView('chat');
-            setSelectedThread(undefined);
-          }}
-        >
-          <span className="dotted-logo">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-          OpenDots<span className="wordmark-dot">•</span>
-        </button>
-        <button
-          className="new-chat nav-item"
-          disabled={!configured}
-          onClick={() => void newConversation()}
-        >
-          <Plus size={17} />
-          <span>New chat</span>
-        </button>
-        <div className="spaces-heading nav-label">
-          DOTS
+        {mobile && (
           <button
-            className="icon-button"
-            aria-label="Create Dot"
-            onClick={() =>
-              setDialog({ type: 'dot', spaceId: workspace.spaces[0].id })
-            }
-          >
-            <Plus size={14} />
-          </button>
-        </div>
-        <nav className="dots-nav" aria-label="Dots">
-          {workspace.dots.map((item) => (
-            <div className="dot-nav-row" key={item.id}>
+            className="nav-scrim"
+            aria-label="Close navigation"
+            onClick={() => setMobile(false)}
+          />
+        )}
+        <Sidebar
+          workspace={workspace}
+          settings={state.settings}
+          open={mobile}
+          search={search}
+          activeDot={view === 'chat' ? dot.id : undefined}
+          activeSpace={view === 'space' ? spaceId : undefined}
+          memoryActive={view === 'memory'}
+          onSearch={setSearch}
+          onNew={() => void newConversation()}
+          onDot={chooseDot}
+          onEditDot={(item) =>
+            setDialog({ type: 'dot', dot: item, spaceId: item.spaceId })
+          }
+          onCreateDot={() =>
+            setDialog({ type: 'dot', spaceId: workspace.spaces[0].id })
+          }
+          onSpace={(id) => openPage(id)}
+          onCreateSpace={() => setDialog({ type: 'space' })}
+          onMemory={() => {
+            if (setView('memory')) setMobile(false);
+          }}
+          onSettings={() => setDialog({ type: 'settings' })}
+        />
+        <div className="main">
+          {error && (
+            <div className="error-banner" role="alert">
+              <span>{error}</span>
               <button
-                className={`dot-nav ${dot.id === item.id && view === 'chat' ? 'active' : ''}`}
-                aria-current={
-                  dot.id === item.id && view === 'chat' ? 'page' : undefined
-                }
-                onClick={() => chooseDot(item)}
+                className="icon-button"
+                aria-label="Dismiss error"
+                onClick={() => setNotices((current) => dismissNotice(current))}
               >
-                <Mascot identity={item.id} name={item.name} small decorative />
-                <span>{item.name}</span>
-              </button>
-              <button
-                className="icon-button dot-settings"
-                aria-label={`Edit ${item.name} settings`}
-                onClick={() =>
-                  setDialog({ type: 'dot', dot: item, spaceId: item.spaceId })
-                }
-              >
-                <MoreHorizontal size={15} />
+                <X size={16} />
               </button>
             </div>
-          ))}
-        </nav>
-        <div className="spaces-heading nav-label">
-          SPACES
-          <button
-            className="icon-button"
-            aria-label="Create Space"
-            onClick={() => setDialog({ type: 'space' })}
-          >
-            <Plus size={14} />
-          </button>
-        </div>
-        <nav className="spaces-nav" aria-label="Spaces">
-          {workspace.spaces.map((space) => (
-            <SpaceNav
-              key={space.id}
-              space={space}
-              active={view === 'space' && spaceId === space.id}
+          )}
+          {paused && (
+            <div className="notice">
+              All Dots are paused. Resume them in Settings.
+            </div>
+          )}
+          {!online && view === 'chat' && (
+            <div className="notice">
+              Hearth-Core is not answering at{' '}
+              <code>{workspace.setup.core.url}</code>, so Dots cannot run. Start
+              it with <code>./hearth-core.sh dev</code>, or set{' '}
+              <code>HEARTH_CORE_URL</code>.
+            </div>
+          )}
+          {view === 'space' ? (
+            <SpaceWorkspace
+              key={spaceId}
+              space={
+                workspace.spaces.find((s) => s.id === spaceId) ??
+                workspace.spaces[0]
+              }
               pageId={pageId}
-              onOpen={(id) => openPage(space.id, id)}
+              workspace={workspace}
+              paused={paused}
+              onPage={(id) => openPage(spaceId, id)}
+              onSettings={() => setDialog({ type: 'settings' })}
+              onCreateDot={() => setDialog({ type: 'dot', spaceId })}
+              onDirty={setDirtyPage}
+              onRefresh={refresh}
+              onThread={(id) => {
+                const target = workspace.conversations.find((t) => t.id === id);
+                if (target && setView('chat')) {
+                  setSelectedDot(target.dotId);
+                  setSelectedThread(id);
+                }
+              }}
             />
-          ))}
-        </nav>
-        {configured ? (
-          <ThreadList
-            dotId={dot.id}
-            dots={workspace.dots}
-            local={workspace.conversations}
-            selected={view === 'chat' ? selectedThread : undefined}
-            onSelect={(id) => {
-              const conversation = workspace.conversations.find(
-                (item) => item.id === id,
-              );
-              if (conversation) setSelectedDot(conversation.dotId);
-              setSelectedThread(id);
-              setView('chat');
-              setMobile(false);
-            }}
-            onNew={() => void newConversation()}
-          />
-        ) : (
-          <div className="sidebar-empty">
-            Set up text chat to begin a persistent conversation.
-          </div>
-        )}
-        <div className="sidebar-bottom">
-          <button
-            className={`nav-item ${view === 'tasks' ? 'active' : ''}`}
-            onClick={() => {
-              setView('tasks');
-              setMobile(false);
-            }}
-          >
-            <Clock3 size={17} />
-            <span>Scheduled & activity</span>
-            {state.tasks.length > 0 && <small>{state.tasks.length}</small>}
-          </button>
-          <button
-            className={`nav-item ${view === 'memories' ? 'active' : ''}`}
-            onClick={() => {
-              setView('memories');
-              setMobile(false);
-            }}
-          >
-            <BookOpen size={17} />
-            <span>Memories</span>
-            {state.memories.length > 0 && (
-              <small>{state.memories.length}</small>
-            )}
-          </button>
-          <button
-            className="nav-item"
-            onClick={() => setDialog({ type: 'settings' })}
-          >
-            <Settings2 size={17} />
-            <span>Settings & setup</span>
-          </button>
-          <a
-            className="nav-item"
-            href="https://github.com/CopilotKit/OpenDots"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <Code2 size={17} />
-            <span>Make it your own</span>
-            <ArrowUpRight size={13} />
-          </a>
-          <div className="version">
-            OPEN SOURCE TEMPLATE <span>v0.1</span>
-          </div>
-        </div>
-      </aside>
-      <div className="workspace">
-        <header className="topbar">
-          <button
-            className="desktop-nav-toggle document-icon"
-            aria-label={navCollapsed ? 'Show navigation' : 'Hide navigation'}
-            onClick={() => setNavCollapsed(!navCollapsed)}
-          >
-            <PanelLeft size={18} />
-          </button>
-          <div className="breadcrumbs">
-            <span>
-              {view === 'space'
-                ? workspace.spaces.find((space) => space.id === spaceId)?.name
-                : 'Dots'}
-            </span>
-            <span>/</span>
-            <strong>
-              {view === 'chat'
-                ? dot.name
-                : view === 'tasks'
-                  ? 'Activity'
-                  : view === 'space'
-                    ? 'Pages'
-                    : 'Memories'}
-            </strong>
-          </div>
-          <div className="top-actions">
-            <span className="mode-badge">
-              {configured ? 'SELF-HOSTED' : 'SETUP REQUIRED'}
-            </span>
-            <button
-              className="pause-button"
-              aria-label={
-                state.settings.paused ? 'Resume all Dots' : 'Pause all Dots'
+          ) : view === 'memory' ? (
+            <MemoryView
+              memories={state.memories}
+              settings={state.settings}
+              onAdd={() => setDialog({ type: 'memory' })}
+              onEdit={(memory) => setDialog({ type: 'memory', memory })}
+              onDelete={(memory) =>
+                void mutate(`/memories/${memory.id}`, 'DELETE', {})
               }
-              onClick={() =>
-                void mutate('/settings', 'PATCH', {
-                  paused: !state.settings.paused,
-                })
-              }
-            >
-              {state.settings.paused ? <Play size={14} /> : <Pause size={14} />}
-              <span>{state.settings.paused ? 'Resume' : 'Pause'}</span>
-            </button>
-            <button
-              className="icon-button"
-              aria-label={pane ? 'Hide computer' : 'Show computer'}
-              aria-expanded={pane}
-              onClick={() => setPane(!pane)}
-            >
-              <Monitor size={18} />
-            </button>
-          </div>
-        </header>
-        {error && (
-          <div className="error-banner" role="alert">
-            <span>{error}</span>
-            <button
-              className="icon-button"
-              aria-label="Dismiss error"
-              onClick={() => setNotices((current) => dismissNotice(current))}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
-        {state.settings.paused && (
-          <div className="notice">
-            All Dots are paused. Active compute stops and scheduled tasks wait.
-          </div>
-        )}
-        {view === 'space' ? (
-          <SpaceWorkspace
-            key={spaceId}
-            space={
-              workspace.spaces.find((s) => s.id === spaceId) ??
-              workspace.spaces[0]
-            }
-            pageId={pageId}
-            workspace={workspace}
-            paused={state.settings.paused}
-            onPage={(id) => openPage(spaceId, id)}
-            onSettings={() => setDialog({ type: 'settings' })}
-            onCreateDot={() => setDialog({ type: 'dot', spaceId })}
-            onDirty={setDirtyPage}
-            onRefresh={refresh}
-            onSchedule={(threadId) => setDialog({ type: 'schedule', threadId })}
-            onThread={(id) => {
-              const target = workspace.conversations.find((t) => t.id === id);
-              if (target) {
-                setView('chat');
-                setSelectedDot(target.dotId);
-                setSelectedThread(id);
-              }
-            }}
-          />
-        ) : view === 'chat' ? (
-          <div className={`chat-workspace ${pane ? 'split' : ''}`}>
-            <div className="chat-column">
-              {thread && configured ? (
-                <Chat
-                  key={thread.id}
-                  thread={thread}
-                  dot={dot}
-                  initialPrompt={pendingPrompt}
-                  onConsumed={() => setPendingPrompt(undefined)}
-                  voiceReady={workspace.setup.voice}
-                  calls={workspace.calls.filter(
-                    (call) => call.threadId === thread.id,
-                  )}
-                  paused={state.settings.paused}
-                  onSaved={refresh}
-                  onComputer={() => setPane(true)}
-                  onSchedule={() =>
-                    setDialog({ type: 'schedule', threadId: thread.id })
-                  }
-                />
-              ) : (
-                <div className="new-conversation">
-                  <div className="empty-chat-persona">
-                    <Mascot
-                      identity={dot.id}
-                      name={dot.name}
-                      state={state.settings.paused ? 'paused' : 'idle'}
-                    />
-                    <h2>{dot.name}</h2>
-                    <p>{dot.instructions}</p>
-                    <button
-                      className="text-button"
-                      onClick={() =>
-                        setDialog({ type: 'dot', dot, spaceId: dot.spaceId })
-                      }
-                    >
-                      Edit specialist <MoreHorizontal size={14} />
-                    </button>
-                  </div>
-                  {!configured && (
-                    <div className="setup-card">
-                      <span className="setup-icon">
-                        <Settings2 size={20} />
-                      </span>
-                      <div>
-                        <strong>Connect your Dot</strong>
-                        <p>
-                          Connect your model and conversation service in
-                          Settings to start chatting. Your Spaces and Dot
-                          preferences are ready to use.
-                        </p>
-                        <p>
-                          Setup and usage metadata is collected by default.{' '}
-                          <a
-                            href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP-TELEMETRY.md"
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Tracking and opt-out details
-                          </a>
-                        </p>
-                        <a
-                          href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP.md"
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open the setup guide <ArrowUpRight size={12} />
-                        </a>
-                      </div>
-                    </div>
-                  )}
-                  <form
-                    className="composer"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void newConversation(prompt);
-                    }}
+            />
+          ) : thread ? (
+            <Chat
+              key={thread.id}
+              thread={thread}
+              dot={dot}
+              spaces={workspace.spaces}
+              online={online}
+              initialPrompt={pendingPrompt}
+              onConsumed={() => setPendingPrompt(undefined)}
+              paused={paused}
+              computerOpen={computerOpen}
+              headerActions={conversationMenu}
+              onSaved={refresh}
+              onComputer={() => setComputerOpen(!computerOpen)}
+              onOpenFile={showFile}
+              onTurnFinished={turnFinished}
+            />
+          ) : (
+            <div className="chat">
+              <DotHeader
+                dot={dot}
+                online={online}
+                state={paused ? 'paused' : 'idle'}
+                status={
+                  paused
+                    ? 'paused'
+                    : online
+                      ? 'computer running'
+                      : 'computer offline'
+                }
+              >
+                {conversationMenu}
+                <button
+                  className={`icon-button ${computerOpen ? 'active' : ''}`}
+                  aria-label={computerOpen ? 'Hide computer' : 'Show computer'}
+                  aria-pressed={computerOpen}
+                  onClick={() => setComputerOpen(!computerOpen)}
+                >
+                  <Monitor size={17} />
+                </button>
+              </DotHeader>
+              <div className="chat-scroll">
+                <div className="chat-column new-conversation">
+                  <Mascot
+                    identity={dot.id}
+                    name={dot.name}
+                    state={paused ? 'paused' : 'idle'}
+                  />
+                  <h2>{dot.name}</h2>
+                  {dot.role && <span className="new-role">{dot.role}</span>}
+                  <p>{dot.instructions}</p>
+                  <button
+                    className="text-button"
+                    onClick={() =>
+                      setDialog({ type: 'dot', dot, spaceId: dot.spaceId })
+                    }
                   >
-                    <textarea
-                      aria-label="Start a conversation"
-                      placeholder={
-                        configured
-                          ? `Message ${dot.name}…`
-                          : 'Your first conversation starts after setup.'
-                      }
-                      value={prompt}
-                      maxLength={4000}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      onKeyDown={(e) =>
-                        submitComposerOnEnter(
-                          e,
-                          configured && !busy && !!prompt.trim(),
-                        )
-                      }
-                      disabled={!configured}
-                    />
-                    <div className="composer-bottom">
-                      <span>
-                        <MessageCircle size={14} />
-                        Text and calls, one continuing conversation
-                      </span>
-                      <button
-                        className="send-button"
-                        aria-label="Start conversation"
-                        disabled={!configured || busy || !prompt.trim()}
-                      >
-                        <ArrowUp size={19} />
-                      </button>
-                    </div>
-                  </form>
+                    Edit specialist <MoreHorizontal size={14} />
+                  </button>
                   <div className="starter-suggestions">
-                    {[
-                      'Help me think this through',
-                      'Research a public page',
-                      'Make a plan I can follow',
-                    ].map((text) => (
+                    {STARTERS.map((text) => (
                       <button
                         key={text}
-                        disabled={!configured}
+                        disabled={paused || !online}
                         onClick={() => setPrompt(text)}
                       >
                         {text}
@@ -741,225 +443,53 @@ export function App() {
                       </button>
                     ))}
                   </div>
-                  <div className="connection-note">
-                    <span
-                      className={`online-dot ${workspace.setup.slack === 'online' ? '' : 'off'}`}
-                    />
-                    Slack · {workspace.setup.slack.replaceAll('_', ' ')}
-                    <button
-                      className="text-button"
-                      onClick={() => setDialog({ type: 'settings' })}
-                    >
-                      Setup details
-                    </button>
-                  </div>
                 </div>
-              )}
-            </div>
-            {pane && (
-              <ResultPane
-                key={dot.id}
-                dots={workspace.dots}
-                defaultDotId={dot.id}
-                latest={capture}
-                dotState="idle"
-                onClose={() => setPane(false)}
-              />
-            )}
-          </div>
-        ) : (
-          <main className="main-content">
-            <div className="page-heading">
-              <div>
-                <span className="eyebrow">YOUR WORKSPACE</span>
-                <h1>
-                  {view === 'memories'
-                    ? 'Memories'
-                    : 'A little follow-through.'}
-                </h1>
-                <p>
-                  {view === 'memories'
-                    ? 'Preferences you choose to share with your Dots.'
-                    : 'Scheduled turns run on the server in their original conversation.'}
-                </p>
               </div>
-              {view === 'memories' && (
-                <button
-                  className="primary"
-                  onClick={() => setDialog({ type: 'memory' })}
-                >
-                  <Plus size={15} />
-                  Add memory
-                </button>
-              )}
+              <div className="chat-dock">
+                <Composer
+                  value={prompt}
+                  onChange={setPrompt}
+                  placeholder={
+                    paused
+                      ? 'All Dots are paused'
+                      : online
+                        ? `Ask ${dot.name} anything`
+                        : 'Waiting for Hearth-Core…'
+                  }
+                  disabled={paused || !online || busy}
+                  onSubmit={() => void newConversation(prompt)}
+                  onAttach={() => setComputerOpen(true)}
+                />
+              </div>
             </div>
-            {view === 'memories' ? (
-              <>
-                <div className="memory-grid">
-                  {state.memories.map((memory) => (
-                    <article className="memory-card" key={memory.id}>
-                      <BookOpen size={18} />
-                      <p>{memory.text}</p>
-                      <div>
-                        <small>
-                          {state.settings.memoryAllowed
-                            ? 'Available to permitted Dots'
-                            : 'Memory use disabled'}
-                        </small>
-                        <button
-                          className="icon-button"
-                          aria-label="Edit memory"
-                          onClick={() => setDialog({ type: 'memory', memory })}
-                        >
-                          <MoreHorizontal size={17} />
-                        </button>
-                        <button
-                          className="icon-button"
-                          aria-label="Delete memory"
-                          onClick={() =>
-                            void mutate(`/memories/${memory.id}`, 'DELETE', {})
-                          }
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-                {!state.memories.length && (
-                  <div className="large-empty">
-                    <Mascot />
-                    <h2>A little context goes a long way.</h2>
-                    <p>
-                      Add a preference like “Keep my research briefs short.” You
-                      can change or remove it anytime.
-                    </p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                <label className="search-box">
-                  <Search size={16} />
-                  <input
-                    aria-label="Search tasks"
-                    placeholder="Find a task…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </label>
-                <div className="task-list">
-                  {state.tasks
-                    .filter((task) =>
-                      task.prompt.toLowerCase().includes(search.toLowerCase()),
-                    )
-                    .map((task) => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        onClick={() =>
-                          void api<Detail>(`/tasks/${task.id}`)
-                            .then(setTaskDetail)
-                            .catch((e) => setError(e.message))
-                        }
-                      />
-                    ))}
-                </div>
-                {!state.tasks.length && (
-                  <div className="large-empty">
-                    <Clock3 size={32} />
-                    <h2>Let a thought come back around.</h2>
-                    <p>
-                      Open a conversation and use the clock button to schedule a
-                      server-side task.
-                    </p>
-                  </div>
-                )}
-                {taskDetail && (
-                  <section className="task-detail-card">
-                    <h2>{taskDetail.task.prompt}</h2>
-                    <TaskActions
-                      task={taskDetail.task}
-                      busy={busy}
-                      settings={state.settings}
-                      onAction={(action) =>
-                        void mutate(
-                          `/tasks/${taskDetail.task.id}/actions`,
-                          'POST',
-                          { action },
-                        )
-                      }
-                      onSchedule={async () => {
-                        const raw = window.prompt(
-                          'Repeat interval in minutes (0 removes the schedule)',
-                          String((taskDetail.task.intervalSeconds ?? 0) / 60),
-                        );
-                        if (raw === null) return;
-                        const value = Number(raw);
-                        if (!Number.isFinite(value) || value < 0) {
-                          setError('Enter a valid number of minutes.');
-                          return;
-                        }
-                        await mutate(
-                          `/tasks/${taskDetail.task.id}/schedule`,
-                          'PUT',
-                          {
-                            intervalSeconds: value
-                              ? Math.round(value * 60)
-                              : null,
-                          },
-                        );
-                      }}
-                    />
-                    {taskDetail.task.error && (
-                      <p className="chat-error">{taskDetail.task.error}</p>
-                    )}
-                    {taskDetail.events.slice(-6).map((event) => (
-                      <p className="muted" key={event.id}>
-                        {event.text}
-                      </p>
-                    ))}
-                    <small>{taskDetail.runs.length} saved runs</small>
-                  </section>
-                )}
-              </>
-            )}
-          </main>
+          )}
+        </div>
+        {showComputer && (
+          <ComputerPanel
+            key={dot.id}
+            dot={dot}
+            openFile={openFile}
+            turnsFinished={turnsFinished}
+            onToggleMemory={async (allowed) => {
+              await mutate(
+                `/dots/${dot.id}`,
+                'PUT',
+                dotPayload(dot, { memoryAllowed: allowed }),
+              );
+            }}
+            onClose={() => setComputerOpen(false)}
+          />
         )}
-        {pane && view !== 'chat' && (
-          <div className="computer-overlay">
-            <ResultPane
-              key={view === 'space' ? spaceId : dot.id}
-              dots={workspace.dots}
-              defaultDotId={
-                view === 'space'
-                  ? (workspace.dots.find((candidate) =>
-                      candidate.spaceIds.includes(spaceId),
-                    )?.id ?? dot.id)
-                  : dot.id
-              }
-              dotState="idle"
-              onClose={() => setPane(false)}
-            />
-          </div>
+        {dialog && (
+          <WorkspaceDialog
+            dialog={dialog}
+            state={state}
+            workspace={workspace}
+            onClose={() => setDialog(undefined)}
+            mutate={mutate}
+          />
         )}
       </div>
-      {dialog && (
-        <WorkspaceDialog
-          dialog={dialog}
-          state={state}
-          workspace={workspace}
-          onClose={() => setDialog(undefined)}
-          mutate={mutate}
-        />
-      )}
-    </div>
-  );
-  return configured ? (
-    <CopilotKitProvider runtimeUrl="/api/copilotkit" headers={authHeaders()}>
-      {content}
     </CopilotKitProvider>
-  ) : (
-    content
   );
 }

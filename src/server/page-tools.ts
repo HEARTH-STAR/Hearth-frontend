@@ -1,7 +1,19 @@
-import { defineTool } from '@copilotkit/runtime/v2';
 import { z } from 'zod';
 import type { WorkspaceStore } from './workspace.js';
 import { pageInput, pagePatch } from './pages.js';
+/** A page tool Claude Code calls through Hearth-Core; this server runs it. */
+export interface PageTool {
+  name: string;
+  description: string;
+  parameters: z.ZodType;
+  execute: (input: never) => Promise<unknown>;
+}
+const defineTool = <T extends z.ZodType>(tool: {
+  name: string;
+  description: string;
+  parameters: T;
+  execute: (input: z.output<T>) => Promise<unknown>;
+}): PageTool => tool as PageTool;
 export function pageAccess(
   workspace: WorkspaceStore,
   spaceId: string,
@@ -44,7 +56,7 @@ export function pageAccess(
   };
 }
 
-export function pageTools(access: ReturnType<typeof pageAccess>) {
+export function pageTools(access: ReturnType<typeof pageAccess>): PageTool[] {
   const scope = {
     spaceId: z
       .string()

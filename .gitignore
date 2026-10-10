@@ -3,11 +3,9 @@ dist/
 .env
 .env.*
 !.env.example
-.opendots/
 artifacts/
 playwright-report/
 test-results/
-docs/superpowers/
 RESEARCH.md
 .DS_Store
 

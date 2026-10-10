@@ -3,7 +3,7 @@
 (function () {
   var preference = 'system';
   try {
-    preference = localStorage.getItem('opendots-theme') || 'system';
+    preference = localStorage.getItem('hearth-theme') || 'system';
   } catch (error) {}
   var dark =
     preference === 'dark' ||

@@ -1,4 +1,8 @@
 import { WorkspaceStore } from './workspace.js';
+/**
+ * Lets through only the CopilotKit runtime routes the web app uses (SSE mode), and only for a
+ * Dot and a conversation this owner has: ``info``, and ``agent/:dotId/run|connect|stop``.
+ */
 export function validateRuntimeScope(
   request: Request,
   workspace: WorkspaceStore,
@@ -7,7 +11,7 @@ export function validateRuntimeScope(
   const url = new URL(request.url);
   const prefix = '/api/copilotkit/';
   const deny = () => {
-    throw new Error('This runtime route is not enabled in OpenDots.');
+    throw new Error('This runtime route is not enabled in Hearth.');
   };
   if (!url.pathname.startsWith(prefix)) return deny();
   const path = url.pathname.slice(prefix.length);
@@ -24,9 +28,8 @@ export function validateRuntimeScope(
   let match: RegExpMatchArray | null;
   // Match the whole path. The SDK accepts suffix matches, so accepting arbitrary
   // prefixes here would validate a different thread than the SDK dispatches.
-  if (path === 'info' || path === 'threads') methods = ['GET'];
-  else if (path === 'threads/subscribe') methods = ['POST'];
-  else if ((match = path.match(/^agent\/([^/]+)\/(run|connect|suggest)$/))) {
+  if (path === 'info') methods = ['GET'];
+  else if ((match = path.match(/^agent\/([^/]+)\/(run|connect)$/))) {
     agentId = id(match[1]);
     threadId = typeof data.threadId === 'string' ? data.threadId : undefined;
     if (!threadId) return deny();
@@ -35,27 +38,6 @@ export function validateRuntimeScope(
     agentId = id(match[1]);
     threadId = id(match[2]);
     methods = ['POST'];
-  } else if (
-    (match = path.match(/^threads\/([^/]+)\/(messages|events|state|archive)$/))
-  ) {
-    threadId = id(match[1]);
-    methods = match[2] === 'archive' ? ['POST'] : ['GET'];
-  } else if ((match = path.match(/^threads\/([^/]+)$/))) {
-    // Reserved suffixes resolve before threads/update inside the SDK router.
-    if (
-      [
-        'clear',
-        'info',
-        'inspector-metadata',
-        'inspector-learning',
-        'transcribe',
-        'cpk-debug-events',
-        'annotate',
-      ].includes(match[1])
-    )
-      return deny();
-    threadId = id(match[1]);
-    methods = ['PATCH', 'DELETE'];
   } else return deny();
   if (!methods.includes(request.method)) return deny();
   const bodyAgent = typeof data.agentId === 'string' ? data.agentId : undefined;

@@ -1,36 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { Store } from '../src/server/store.js';
-import { WorkspaceStore } from '../src/server/workspace.js';
-import { Platform } from '../src/server/platform.js';
-import { Runner } from '../src/server/runner.js';
-import { createApp } from '../src/server/app.js';
+import { fixture as base } from './helpers.js';
 const cleanup: (() => void)[] = [];
 afterEach(() => cleanup.splice(0).forEach((fn) => fn()));
 function fixture(ownerToken?: string) {
-  const store = new Store(':memory:');
-  const ws = new WorkspaceStore(':memory:', 'owner');
-  cleanup.push(() => {
-    store.close();
-    ws.close();
-  });
-  const config = { mode: 'live' as const, baseUrl: 'https://example.com' };
-  const platform = new Platform(store, ws, {
-    baseUrl: config.baseUrl,
-    voiceName: 'marin',
-    slackUsers: [],
-    runtimeUrl: '',
-  });
-  return {
-    ws,
-    platform,
-    app: createApp({
-      store,
-      runner: new Runner(store, config),
-      config,
-      platform,
-      ownerToken,
-    }),
-  };
+  const value = base({ ownerToken });
+  cleanup.push(() => value.close());
+  return { ws: value.workspace, platform: value.platform, app: value.app };
 }
 const request = (body: unknown, method = 'POST') => ({
   method,
@@ -38,59 +13,6 @@ const request = (body: unknown, method = 'POST') => ({
   body: JSON.stringify(body),
 });
 
-it('saves Learning settings through the owner API and rejects malformed container IDs', async () => {
-  const { ws, app } = fixture();
-  const dot = ws.dots()[0];
-  const body = {
-    name: dot.name,
-    instructions: dot.instructions,
-    researchAllowed: true,
-    memoryAllowed: true,
-    learningContainerId: 'research',
-    skillDeliveryEnabled: true,
-  };
-  expect(
-    (await app.request(`/api/dots/${dot.id}`, request(body, 'PUT'))).status,
-  ).toBe(200);
-  expect(ws.dot(dot.id)).toMatchObject({
-    learningContainerId: 'research',
-    skillDeliveryEnabled: true,
-  });
-  expect(
-    (
-      await app.request(
-        `/api/dots/${dot.id}`,
-        request({ ...body, learningContainerId: 'bad--id' }, 'PUT'),
-      )
-    ).status,
-  ).toBe(400);
-  expect(
-    (
-      await app.request(
-        `/api/dots/${dot.id}`,
-        request({ ...body, learningContainerId: null }, 'PUT'),
-      )
-    ).status,
-  ).toBe(400);
-  const created = await app.request(
-    '/api/dots',
-    request({ ...body, spaceId: dot.spaceId }),
-  );
-  expect(created.status).toBe(201);
-  expect(await created.json()).toMatchObject({
-    learningContainerId: 'research',
-    skillDeliveryEnabled: true,
-  });
-  const privateApp = fixture('owner-secret');
-  expect(
-    (
-      await privateApp.app.request(
-        `/api/dots/${privateApp.ws.dots()[0].id}`,
-        request(body, 'PUT'),
-      )
-    ).status,
-  ).toBe(401);
-});
 it('supports manual pages without credentials and returns validation, scope and conflict statuses', async () => {
   const { ws, app } = fixture();
   const space = ws.spaces()[0].id;
@@ -123,7 +45,7 @@ it('supports manual pages without credentials and returns validation, scope and 
         request({ dotId: ws.dots()[0].id }),
       )
     ).status,
-  ).toBe(503);
+  ).toBe(200);
   expect(ws.pages.get(space, page.id).content).toBe('First');
   expect(
     (
@@ -283,9 +205,10 @@ it('answers malformed JSON and invalid Space access with 400 on workspace routes
   }
   const body = {
     name: dot.name,
+    role: dot.role,
     instructions: dot.instructions,
-    researchAllowed: true,
     memoryAllowed: true,
+    spaceId: dot.spaceId,
   };
   expect(
     (
@@ -305,16 +228,20 @@ it('answers malformed JSON and invalid Space access with 400 on workspace routes
   ).toBe(400);
 });
 
-it('keeps upstream JSON parsing failures on workspace routes as 503', async () => {
+it('answers unexpected workspace failures with 500 and no details', async () => {
   const { ws, app } = fixture();
   vi.spyOn(ws, 'createSpace').mockImplementation(() => {
     throw new SyntaxError('Unexpected token in upstream response');
   });
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   const response = await app.request(
     '/api/spaces',
     request({ name: 'Valid', description: '' }),
   );
-  expect(response.status).toBe(503);
+  expect(response.status).toBe(500);
+  expect(JSON.stringify(await response.json())).not.toContain(
+    'Unexpected token',
+  );
 });
 
 it('deletes pages through the API and returns 404 for missing pages or spaces', async () => {
@@ -409,12 +336,12 @@ it.each([
   },
 );
 
-it('keeps real Intelligence failures as 503 without exposing details', async () => {
+it('keeps page failures as 503 without exposing details', async () => {
   const { ws, app, platform } = fixture();
   ws.bindThread('valid-thread', ws.dots()[0].id, 'Conversation');
-  vi.spyOn(platform.pages, 'saveConversation').mockRejectedValueOnce(
-    new Error('Provider secret'),
-  );
+  vi.spyOn(platform.pages, 'saveConversation').mockImplementationOnce(() => {
+    throw new Error('Provider secret');
+  });
   const response = await app.request(
     '/api/conversations/valid-thread/page',
     request({ title: 'Draft' }),
@@ -422,15 +349,15 @@ it('keeps real Intelligence failures as 503 without exposing details', async () 
   expect(response.status).toBe(503);
   expect(await response.json()).toEqual({
     error:
-      'Page operation could not complete. Check Intelligence setup or retry; your draft has not been discarded.',
+      'Page operation could not complete. Retry; your draft has not been discarded.',
   });
 });
 
-it('answers 404, not 503, for a conversation or call that does not exist', async () => {
+it('answers 404, not 503, for a conversation that does not exist', async () => {
   const { app } = fixture();
   for (const path of [
-    '/api/conversations/missing/capture',
-    '/api/voice/calls/missing',
+    '/api/conversations/missing/page-context',
+    '/api/conversations/missing/reviewed-page/call',
   ]) {
     const response = await app.request(path);
     expect(response.status).toBe(404);

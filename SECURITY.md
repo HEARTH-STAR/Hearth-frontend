@@ -1,22 +1,21 @@
 # Security
 
-OpenDots is an application template under development, not a hosted service. The local prototype is single-owner; Space membership, Slack identity mapping, and voice delegation require additional enforcement before connected multi-user use. It is not a security-audited autonomous agent.
+Hearth-frontend is a single-owner web app under development, not a hosted service.
 
 ## Intended boundary
 
-- Run local development on loopback.
-- Protect remote deployments with authentication and HTTPS.
-- Keep the browser service isolated from the application host and private networks. Do not expose its port publicly.
-- Keep Intelligence, model, speech, and browser credentials on the server. Never commit `.env` files or local databases.
-- Treat page text, uploaded content, and model output as untrusted data, not authorization to change permissions.
-- Authorize every Space, Dot, and thread operation on the server. Map Slack actors explicitly; never treat a display name or client-supplied user ID as proof of identity.
-- Voice sessions must use scoped, short-lived credentials and route compute actions through the same permissions as text and Slack.
-- Research browsing is read-only. Page tools can edit local documents in the executing Dot’s Space; those writes use revision checks. Adding external writes requires a separate authorization and review design.
-
-Recurring work requires an available server. A sample run is not evidence that a live provider or deployment is safe or configured correctly. Review results before using them for important decisions.
+- Run on loopback. Listening on any other address requires an `OWNER_TOKEN` of 24+ characters; put HTTPS in
+  front of a remote deployment.
+- The browser reaches only this server. Hearth-Core and Hearth-backend credentials and addresses stay on the
+  server.
+- Claude Code runs in Hearth-Core under its own policy hook (no permission bypass, no web tools, no git
+  remotes). The Files and Shell permissions shown in the app are enforced there, per turn.
+- Page text, file contents, tool output and model output are untrusted data, never authorization.
+- Page tools write only to Spaces the Dot was granted, with revision checks. `review_space_page` saves only
+  after the owner approves.
+- Never commit `.env` files or the `data/` databases.
 
 ## Reporting
 
-Use the repository's private vulnerability reporting feature when available. If it is unavailable, open an issue asking for a private reporting channel without including exploit details, credentials, private URLs, or personal data.
-
-Do not post sensitive reproduction data in a public issue. This project does not currently promise a response-time SLA or offer a bug bounty.
+Use the repository's private vulnerability reporting if available. Otherwise open an issue asking for a
+private channel, without exploit details, credentials or personal data.

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, FileText, ArrowUpRight } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { pageReviewSchema } from '../shared/page-review';
+import type { Space } from '../shared/types';
 import {
   decidePageReview,
   isDeletedReview,
@@ -18,6 +19,7 @@ export function PageReviewCard({
   respond,
   threadId,
   toolCallId,
+  spaces = [],
   onSaved,
 }: {
   args: unknown;
@@ -26,6 +28,7 @@ export function PageReviewCard({
   respond?: (result: unknown) => Promise<void>;
   threadId: string;
   toolCallId: string;
+  spaces?: Space[];
   onSaved: () => void;
 }) {
   const draft = pageReviewSchema.safeParse(args);
@@ -42,7 +45,10 @@ export function PageReviewCard({
   const removed = !!deletedReview && !conflict;
   const saved = (!!savedPage || removed) && !conflict;
   const pageId = savedPage?.id ?? '';
-  const spaceId = savedPage?.spaceId ?? '';
+  const spaceId =
+    savedPage?.spaceId ?? (draft.success ? draft.data.spaceId : '');
+  const spaceName =
+    spaces.find((space) => space.id === spaceId)?.name ?? 'your Space';
   useEffect(() => {
     let active = true;
     setReceiptReady(false);
@@ -115,38 +121,34 @@ export function PageReviewCard({
       setBusy(false);
     }
   };
+  const eyebrow = conflict
+    ? 'Review changed'
+    : removed
+      ? 'Saved, then deleted'
+      : saved
+        ? 'Saved to your Space'
+        : !receiptReady
+          ? 'Checking saved review…'
+          : finished
+            ? 'Review ended'
+            : 'Review before saving';
   return (
-    <section className="page-review-card" aria-label="Review page draft">
+    <section className="review-card" aria-label="Review page draft">
       <header>
-        <FileText size={17} />
-        <strong>
-          {conflict
-            ? 'Review changed'
-            : removed
-              ? 'Saved, then deleted'
-              : saved
-                ? 'Saved to your Space'
-                : !receiptReady
-                  ? 'Checking saved review…'
-                  : finished
-                    ? 'Review ended'
-                    : 'Ready for your review'}
-        </strong>
-        <span>
-          {conflict
-            ? 'Needs new review'
-            : saved
-              ? 'Approved'
-              : !receiptReady
-                ? 'Checking'
-                : finished
-                  ? 'Not saved'
-                  : 'You decide'}
-        </span>
-      </header>
-      <div className="page-review-body">
-        <h3>{draft.success ? draft.data.title : 'Preparing your draft…'}</h3>
+        <div>
+          <small>{eyebrow}</small>
+          <strong>
+            {draft.success ? draft.data.title : 'Preparing your draft…'}
+          </strong>
+        </div>
         {draft.success && (
+          <span className="space-chip">
+            <ArrowRight size={12} aria-hidden="true" /> {spaceName}
+          </span>
+        )}
+      </header>
+      {draft.success && (
+        <div className="review-body">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -160,73 +162,95 @@ export function PageReviewCard({
           >
             {draft.data.content}
           </ReactMarkdown>
-        )}
-      </div>
+        </div>
+      )}
       {conflict && (
-        <p role="alert">
+        <p className="review-alert" role="alert">
           This review was saved with a different draft. Start a new review for
           the changed draft.
         </p>
       )}
-      {error && <p role="alert">{error}</p>}
-      {!receiptReady && error && (
-        <button
-          type="button"
-          onClick={() => setRestoreAttempt((attempt) => attempt + 1)}
-        >
-          Retry review
-        </button>
+      {error && (
+        <p className="review-alert" role="alert">
+          {error}
+        </p>
       )}
       <footer>
-        {(saved || conflict) && pageId && spaceId && (
-          <button
-            type="button"
-            className="review-primary"
-            onClick={() =>
-              openPageLink(
-                `/#/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pageId)}`,
-              )
-            }
-          >
-            {conflict ? 'Open saved page' : 'Open page'}{' '}
-            <ArrowUpRight size={15} />
-          </button>
-        )}
-        {!finished && respond && receiptReady && !conflict && (
-          <>
+        <span
+          className={`review-status ${saved && !removed ? 'approved' : ''}`}
+        >
+          {saved && !removed ? (
+            <>
+              <Check size={14} aria-hidden="true" /> Approved · saved to{' '}
+              {spaceName}
+            </>
+          ) : conflict ? (
+            'Needs a new review'
+          ) : !receiptReady ? (
+            error ? (
+              'Could not check this review.'
+            ) : (
+              'Checking whether this draft was already saved.'
+            )
+          ) : finished || removed ? (
+            removed ? (
+              'The page was deleted.'
+            ) : (
+              'No page was saved.'
+            )
+          ) : (
+            'Nothing is saved until you approve.'
+          )}
+        </span>
+        <div className="review-actions">
+          {!receiptReady && error && (
             <button
               type="button"
-              disabled={busy || (!saved && !draft.success)}
-              className="review-primary"
-              onClick={() => void decide(true)}
+              onClick={() => setRestoreAttempt((attempt) => attempt + 1)}
             >
-              <Check size={15} />
-              {busy
-                ? 'Saving…'
-                : saved
-                  ? 'Continue conversation'
-                  : 'Approve & save'}
+              Retry review
             </button>
-            {!saved && (
+          )}
+          {(saved || conflict) && pageId && spaceId && (
+            <button
+              type="button"
+              onClick={() =>
+                openPageLink(
+                  `/#/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pageId)}`,
+                )
+              }
+            >
+              {conflict ? 'Open saved page' : 'Open page'}{' '}
+              <ArrowUpRight size={14} />
+            </button>
+          )}
+          {!finished && respond && receiptReady && !conflict && (
+            <>
+              {!saved && (
+                <button
+                  type="button"
+                  className="quiet"
+                  disabled={busy}
+                  onClick={() => void decide(false)}
+                >
+                  Decline
+                </button>
+              )}
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => void decide(false)}
+                className="review-primary"
+                disabled={busy || (!saved && !draft.success)}
+                onClick={() => void decide(true)}
               >
-                Decline
+                {busy
+                  ? 'Saving…'
+                  : saved
+                    ? 'Continue conversation'
+                    : 'Approve & save'}
               </button>
-            )}
-          </>
-        )}
-        {!saved && !conflict && (
-          <small>
-            {!receiptReady
-              ? 'Checking whether this draft was already saved.'
-              : finished
-                ? 'No page was saved.'
-                : 'Nothing is saved until you approve.'}
-          </small>
-        )}
+            </>
+          )}
+        </div>
       </footer>
     </section>
   );

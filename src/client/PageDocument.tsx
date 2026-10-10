@@ -34,7 +34,6 @@ export function PageDocument({
   onSaved,
   onRefresh,
   onDeleted,
-  onSchedule,
   onThread,
   onSettings,
   onCreateDot,
@@ -50,7 +49,6 @@ export function PageDocument({
   onSaved: (page: Page) => void;
   onRefresh: () => void;
   onDeleted: (id: string) => void;
-  onSchedule: (id: string) => void;
   onThread: (id: string) => void;
   onSettings: () => void;
   onCreateDot: () => void;
@@ -354,7 +352,6 @@ export function PageDocument({
           paused={paused}
           beforeChat={beforeChat}
           onRefresh={onRefresh}
-          onSchedule={onSchedule}
           onSettings={onSettings}
           onCreateDot={onCreateDot}
           onOpenChange={setChatOpen}

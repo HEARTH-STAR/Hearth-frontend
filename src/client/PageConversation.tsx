@@ -11,7 +11,6 @@ export function PageConversation({
   paused,
   beforeChat,
   onRefresh,
-  onSchedule,
   onSettings,
   onCreateDot,
   onOpenChange,
@@ -21,7 +20,6 @@ export function PageConversation({
   paused: boolean;
   beforeChat: () => Promise<boolean>;
   onRefresh: () => void;
-  onSchedule: (id: string) => void;
   onSettings: () => void;
   onCreateDot: () => void;
   onOpenChange: (value: boolean) => void;
@@ -105,13 +103,12 @@ export function PageConversation({
           key={thread.id}
           thread={thread}
           dot={dot}
+          spaces={workspace.spaces}
+          online={workspace.setup.core.reachable}
           initialPrompt={pending}
           onConsumed={() => setPending(undefined)}
-          voiceReady={workspace.setup.voice}
-          calls={workspace.calls.filter((call) => call.threadId === thread.id)}
           paused={paused}
           onSaved={onRefresh}
-          onSchedule={() => onSchedule(thread.id)}
         />
       </aside>
     );
@@ -125,8 +122,8 @@ export function PageConversation({
   if (workspace.setup.missing.length)
     return (
       <div className="document-chat-setup">
-        <span>Connect your assistant to chat about this page.</span>
-        <button onClick={onSettings}>Set up assistant</button>
+        <span>Start Hearth-Core to chat about this page.</span>
+        <button onClick={onSettings}>Setup details</button>
       </div>
     );
   return (

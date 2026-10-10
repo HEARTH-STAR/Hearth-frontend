@@ -1,17 +1,40 @@
 import { ComputerStore } from './computer-store.js';
-import { ConnectionStore } from './connection-store.js';
 import { Pages } from './pages.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { validateLearningSettings } from '../shared/learning.js';
-import type { CallReceipt, Conversation, Dot, Space } from '../shared/types.js';
+import type { Conversation, Dot, Space } from '../shared/types.js';
+export type DotInput = Pick<
+  Dot,
+  'name' | 'role' | 'instructions' | 'memoryAllowed'
+> & {
+  spaceId: string;
+  spaceIds?: string[];
+  directory?: string;
+};
+export type DotPatch = Partial<DotInput>;
+export interface TranscriptEntry {
+  role: 'user' | 'assistant';
+  text: string;
+  createdAt: number;
+}
+/** Lowercase letters, digits and dashes: safe for a folder and a container name. */
+export function slug(value: string, fallback = 'dot') {
+  const result = value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/, '');
+  return result || fallback;
+}
 export class WorkspaceStore {
   private db: DatabaseSync;
   readonly pages: Pages;
   readonly computers: ComputerStore;
-  readonly connections: ConnectionStore;
   constructor(
     path: string,
     readonly ownerId: string,
@@ -20,61 +43,29 @@ export class WorkspaceStore {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS spaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, createdAt INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS dots(id TEXT PRIMARY KEY, spaceId TEXT NOT NULL, name TEXT NOT NULL, instructions TEXT NOT NULL, researchAllowed INTEGER NOT NULL, memoryAllowed INTEGER NOT NULL, createdAt INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS thread_bindings(id TEXT PRIMARY KEY, dotId TEXT NOT NULL, ownerId TEXT NOT NULL, title TEXT NOT NULL, createdAt INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS task_threads(taskId TEXT PRIMARY KEY, threadId TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS calls(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, startedAt INTEGER NOT NULL, endedAt INTEGER, status TEXT NOT NULL, transcript TEXT NOT NULL, error TEXT);
-      CREATE TABLE IF NOT EXISTS captures(threadId TEXT PRIMARY KEY, value TEXT NOT NULL);`);
-    for (const [table, column, definition] of [
-      ['dots', 'learningContainerId', 'TEXT'],
-      ['dots', 'skillDeliveryEnabled', 'INTEGER NOT NULL DEFAULT 0'],
-      ['thread_bindings', 'learningContainerId', 'TEXT'],
-    ]) {
-      if (
-        !this.db
-          .prepare(`PRAGMA table_info(${table})`)
-          .all()
-          .some((field) => field.name === column)
-      )
-        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-    }
-    // Migrate only once: restarting must never restore a revoked grant.
-    if (
-      !this.db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='dot_spaces'",
-        )
-        .get()
-    ) {
-      this.db.exec(`BEGIN;
-        CREATE TABLE dot_spaces(dotId TEXT NOT NULL, spaceId TEXT NOT NULL, PRIMARY KEY(dotId, spaceId));
-        INSERT INTO dot_spaces SELECT id, spaceId FROM dots;
-        COMMIT;`);
-    }
+      CREATE TABLE IF NOT EXISTS dots(id TEXT PRIMARY KEY, spaceId TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, instructions TEXT NOT NULL, directory TEXT NOT NULL, memoryAllowed INTEGER NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS dot_spaces(dotId TEXT NOT NULL, spaceId TEXT NOT NULL, PRIMARY KEY(dotId, spaceId));
+      CREATE TABLE IF NOT EXISTS thread_bindings(id TEXT PRIMARY KEY, dotId TEXT NOT NULL, ownerId TEXT NOT NULL, title TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, preview TEXT NOT NULL DEFAULT '');
+      CREATE TABLE IF NOT EXISTS transcripts(id INTEGER PRIMARY KEY AUTOINCREMENT, threadId TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS transcripts_thread ON transcripts(threadId, id);
+      CREATE TABLE IF NOT EXISTS handoffs(threadId TEXT NOT NULL, toolCallId TEXT NOT NULL, tool TEXT NOT NULL, answered INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(threadId, toolCallId));`);
     this.computers = new ComputerStore(this.db);
-    this.connections = new ConnectionStore(this.db);
     this.pages = new Pages(this.db, (id) =>
       this.spaces().some((space) => space.id === id),
     );
-    if (
-      !this.db
-        .prepare('PRAGMA table_info(calls)')
-        .all()
-        .some((column) => column.name === 'anchorMessageId')
-    )
-      this.db.exec('ALTER TABLE calls ADD COLUMN anchorMessageId TEXT');
     if (!this.spaces().length) {
       const space = this.createSpace(
         'Everyday',
         'A little space for your day.',
       );
-      this.createDot(
-        space.id,
-        'Dot',
-        'Be thoughtful, practical, and concise. Help the user think clearly and follow through.',
-        true,
-        true,
-      );
+      this.createDot({
+        spaceId: space.id,
+        name: 'Scout',
+        role: 'Researcher',
+        instructions:
+          'Be thoughtful, practical, and concise. Read what is in your folder before answering, keep notes as Markdown files, and show drafts for review before saving them to a Space.',
+        memoryAllowed: true,
+      });
     }
   }
   close() {
@@ -82,8 +73,14 @@ export class WorkspaceStore {
   }
   spaces(): Space[] {
     return this.db
-      .prepare('SELECT * FROM spaces ORDER BY createdAt')
-      .all() as unknown as Space[];
+      .prepare(
+        'SELECT spaces.*, (SELECT COUNT(*) FROM pages WHERE pages.spaceId=spaces.id) AS pageCount FROM spaces ORDER BY createdAt',
+      )
+      .all()
+      .map((row) => ({
+        ...row,
+        pageCount: Number(row.pageCount),
+      })) as unknown as Space[];
   }
   createSpace(name: string, description: string): Space {
     const space = {
@@ -91,6 +88,7 @@ export class WorkspaceStore {
       name,
       description,
       createdAt: Date.now(),
+      pageCount: 0,
     };
     this.db
       .prepare('INSERT INTO spaces VALUES (?, ?, ?, ?)')
@@ -109,63 +107,76 @@ export class WorkspaceStore {
           )
           .all(String(row.id))
           .map((grant) => String(grant.spaceId)),
-        researchAllowed: !!row.researchAllowed,
         memoryAllowed: !!row.memoryAllowed,
-        skillDeliveryEnabled: !!row.skillDeliveryEnabled,
       })) as unknown as Dot[];
   }
   dot(id: string) {
     return this.dots().find((dot) => dot.id === id);
   }
-  createDot(
-    spaceId: string,
-    name: string,
-    instructions: string,
-    researchAllowed: boolean,
-    memoryAllowed: boolean,
-    spaceIds: string[] = [spaceId],
-    learningContainerId: string | null = null,
-    skillDeliveryEnabled = false,
-  ): Dot {
-    this.validateSpaceAccess(spaceId, spaceIds);
-    validateLearningSettings(learningContainerId, skillDeliveryEnabled);
+  createDot(input: DotInput): Dot {
+    const spaceIds = [...new Set(input.spaceIds ?? [input.spaceId])].sort();
+    this.validateSpaceAccess(input.spaceId, spaceIds);
+    const id = randomUUID();
     const dot: Dot = {
-      id: randomUUID(),
-      spaceId,
-      spaceIds: [...new Set(spaceIds)].sort(),
-      name,
-      instructions,
-      researchAllowed,
-      memoryAllowed,
-      learningContainerId,
-      skillDeliveryEnabled,
+      id,
+      spaceId: input.spaceId,
+      spaceIds,
+      name: input.name,
+      role: input.role,
+      instructions: input.instructions,
+      directory:
+        input.directory ?? `dots/${slug(input.name)}-${id.slice(0, 8)}`,
+      memoryAllowed: input.memoryAllowed,
       createdAt: Date.now(),
     };
-    this.db.exec('BEGIN');
-    try {
+    this.transaction(() => {
       this.db
-        .prepare(
-          'INSERT INTO dots (id, spaceId, name, instructions, researchAllowed, memoryAllowed, createdAt, learningContainerId, skillDeliveryEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        )
+        .prepare('INSERT INTO dots VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .run(
           dot.id,
-          spaceId,
-          name,
-          instructions,
-          +researchAllowed,
-          +memoryAllowed,
+          dot.spaceId,
+          dot.name,
+          dot.role,
+          dot.instructions,
+          dot.directory,
+          +dot.memoryAllowed,
           dot.createdAt,
-          learningContainerId,
-          +skillDeliveryEnabled,
         );
-      for (const id of dot.spaceIds)
-        this.db.prepare('INSERT INTO dot_spaces VALUES (?, ?)').run(dot.id, id);
-      this.db.exec('COMMIT');
-    } catch (error) {
-      this.db.exec('ROLLBACK');
-      throw error;
-    }
+      for (const space of dot.spaceIds)
+        this.db.prepare('INSERT INTO dot_spaces VALUES (?, ?)').run(id, space);
+    });
     return dot;
+  }
+  updateDot(id: string, patch: DotPatch): Dot {
+    const current = this.dot(id);
+    if (!current) throw new Error('Dot not found.');
+    const next = {
+      ...current,
+      ...Object.fromEntries(
+        Object.entries(patch).filter(([, value]) => value !== undefined),
+      ),
+    };
+    const spaceIds = [...new Set(patch.spaceIds ?? current.spaceIds)].sort();
+    this.validateSpaceAccess(next.spaceId, spaceIds);
+    this.transaction(() => {
+      this.db
+        .prepare(
+          'UPDATE dots SET spaceId=?, name=?, role=?, instructions=?, directory=?, memoryAllowed=? WHERE id=?',
+        )
+        .run(
+          next.spaceId,
+          next.name,
+          next.role,
+          next.instructions,
+          next.directory,
+          +next.memoryAllowed,
+          id,
+        );
+      this.db.prepare('DELETE FROM dot_spaces WHERE dotId=?').run(id);
+      for (const space of spaceIds)
+        this.db.prepare('INSERT INTO dot_spaces VALUES (?, ?)').run(id, space);
+    });
+    return this.dot(id)!;
   }
   canAccessSpace(dotId: string, spaceId: string) {
     return !!this.db
@@ -173,200 +184,104 @@ export class WorkspaceStore {
       .get(dotId, spaceId);
   }
   private validateSpaceAccess(defaultSpace: string, spaceIds: string[]) {
+    const known = new Set(this.spaces().map((space) => space.id));
     if (
       !spaceIds.includes(defaultSpace) ||
-      spaceIds.some((id) => !this.spaces().some((space) => space.id === id))
+      spaceIds.some((id) => !known.has(id))
     )
       throw new Error('Space access must include a valid default destination.');
   }
-  updateDot(
-    id: string,
-    patch: Pick<
-      Dot,
-      'name' | 'instructions' | 'researchAllowed' | 'memoryAllowed'
-    > & {
-      spaceId?: string;
-      spaceIds?: string[];
-      learningContainerId?: string | null;
-      skillDeliveryEnabled?: boolean;
-    },
-  ): Dot {
-    const current = this.dot(id);
-    if (!current) throw new Error('Dot not found.');
-    const defaultSpace = patch.spaceId ?? current.spaceId;
-    const spaceIds = patch.spaceIds ?? current.spaceIds;
-    this.validateSpaceAccess(defaultSpace, spaceIds);
-    const learningContainerId =
-      patch.learningContainerId === undefined
-        ? (current.learningContainerId ?? null)
-        : patch.learningContainerId;
-    const skillDeliveryEnabled =
-      patch.skillDeliveryEnabled ?? current.skillDeliveryEnabled ?? false;
-    validateLearningSettings(learningContainerId, skillDeliveryEnabled);
+  private transaction(fn: () => void) {
     this.db.exec('BEGIN');
     try {
-      this.db
-        .prepare(
-          'UPDATE dots SET name=?, instructions=?, researchAllowed=?, memoryAllowed=?, learningContainerId=?, skillDeliveryEnabled=? WHERE id=?',
-        )
-        .run(
-          patch.name,
-          patch.instructions,
-          +patch.researchAllowed,
-          +patch.memoryAllowed,
-          learningContainerId,
-          +skillDeliveryEnabled,
-          id,
-        );
-      this.db
-        .prepare('UPDATE dots SET spaceId=? WHERE id=?')
-        .run(defaultSpace, id);
-      this.db.prepare('DELETE FROM dot_spaces WHERE dotId=?').run(id);
-      for (const space of new Set(spaceIds))
-        this.db.prepare('INSERT INTO dot_spaces VALUES (?, ?)').run(id, space);
+      fn();
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
     }
-    return this.dot(id)!;
   }
   conversations(): Conversation[] {
     return this.db
       .prepare(
-        'SELECT * FROM thread_bindings WHERE ownerId=? ORDER BY createdAt DESC',
+        'SELECT * FROM thread_bindings WHERE ownerId=? ORDER BY updatedAt DESC',
       )
       .all(this.ownerId) as unknown as Conversation[];
   }
   bindThread(id: string, dotId: string, title: string): Conversation {
-    const dot = this.dot(dotId);
-    if (!dot) throw new Error('Dot not found.');
+    if (!this.dot(dotId)) throw new Error('Dot not found.');
+    const now = Date.now();
     const value: Conversation = {
       id,
       dotId,
       ownerId: this.ownerId,
       title,
-      createdAt: Date.now(),
-      learningContainerId: dot.learningContainerId ?? null,
+      createdAt: now,
+      updatedAt: now,
+      preview: '',
     };
     this.db
-      .prepare(
-        'INSERT INTO thread_bindings (id, dotId, ownerId, title, createdAt, learningContainerId) VALUES (?, ?, ?, ?, ?, ?)',
-      )
-      .run(
-        id,
-        dotId,
-        this.ownerId,
-        title,
-        value.createdAt,
-        value.learningContainerId ?? null,
-      );
+      .prepare('INSERT INTO thread_bindings VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, dotId, this.ownerId, title, now, now, '');
     return value;
   }
   requireThread(id: string, dotId?: string): Conversation {
-    const thread = this.conversations().find((thread) => thread.id === id);
+    const thread = this.db
+      .prepare('SELECT * FROM thread_bindings WHERE id=? AND ownerId=?')
+      .get(id, this.ownerId) as unknown as Conversation | undefined;
     if (!thread || (dotId && thread.dotId !== dotId))
       throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;
   }
-  bindTask(taskId: string, threadId: string) {
-    this.requireThread(threadId);
+  /** Moves a conversation to the top of the sidebar with a fresh one-line preview. */
+  touchThread(id: string, preview: string) {
     this.db
-      .prepare('INSERT INTO task_threads VALUES (?, ?)')
-      .run(taskId, threadId);
+      .prepare('UPDATE thread_bindings SET updatedAt=?, preview=? WHERE id=?')
+      .run(Date.now(), preview.replace(/\s+/g, ' ').trim().slice(0, 160), id);
   }
-  taskThread(taskId: string): string | undefined {
-    const row = this.db
-      .prepare('SELECT threadId FROM task_threads WHERE taskId=?')
-      .get(taskId);
-    return typeof row?.threadId === 'string' ? row.threadId : undefined;
-  }
-  calls(threadId?: string): CallReceipt[] {
-    if (threadId) this.requireThread(threadId);
-    return this.db
-      .prepare(
-        `SELECT * FROM calls ${threadId ? 'WHERE threadId=?' : ''} ORDER BY startedAt DESC`,
-      )
-      .all(...(threadId ? [threadId] : [])) as unknown as CallReceipt[];
-  }
-  createCall(threadId: string): CallReceipt {
-    this.requireThread(threadId);
-    const call: CallReceipt = {
-      id: randomUUID(),
-      threadId,
-      startedAt: Date.now(),
-      endedAt: null,
-      status: 'connecting',
-      transcript: '',
-      error: null,
-    };
-    this.db
-      .prepare(
-        'INSERT INTO calls(id, threadId, startedAt, endedAt, status, transcript, error) VALUES (?, ?, ?, NULL, ?, ?, NULL)',
-      )
-      .run(call.id, threadId, call.startedAt, call.status, '');
-    return call;
-  }
-  call(id: string): CallReceipt {
-    const call = this.calls().find((call) => call.id === id);
-    if (!call) throw new Error('Call not found.');
-    this.requireThread(call.threadId);
-    return call;
-  }
-  setCall(
-    id: string,
-    status: CallReceipt['status'],
-    transcript: string,
-    error: string | null = null,
+  appendTranscript(
+    threadId: string,
+    role: TranscriptEntry['role'],
+    text: string,
   ) {
-    const call = this.call(id);
-    if (call.endedAt) return call;
+    if (!text.trim()) return;
     this.db
       .prepare(
-        'UPDATE calls SET status=?, transcript=?, error=?, endedAt=? WHERE id=?',
+        'INSERT INTO transcripts(threadId, role, text, createdAt) VALUES (?, ?, ?, ?)',
       )
-      .run(
-        status,
-        transcript,
-        error,
-        status === 'ended' || status === 'failed' ? Date.now() : null,
-        id,
-      );
-    return this.call(id);
+      .run(threadId, role, text, Date.now());
   }
-  saveLateTranscript(id: string, transcript: string) {
-    this.call(id);
-    return (
+  /** A decision handed to the owner (a review card); their answer goes to the agent next turn. */
+  openHandoff(threadId: string, toolCallId: string, tool: string) {
+    this.db
+      .prepare('INSERT OR IGNORE INTO handoffs VALUES (?, ?, ?, 0)')
+      .run(threadId, toolCallId, tool);
+  }
+  /** Handoffs whose answer has not reached the agent yet: tool call id → tool name. */
+  openHandoffs(threadId: string) {
+    return new Map(
       this.db
         .prepare(
-          "UPDATE calls SET transcript=? WHERE id=? AND transcript='' AND endedAt IS NOT NULL",
+          'SELECT toolCallId, tool FROM handoffs WHERE threadId=? AND answered=0',
         )
-        .run(transcript, id).changes > 0
+        .all(threadId)
+        .map((row) => [String(row.toolCallId), String(row.tool)]),
     );
   }
-  anchorCall(id: string, anchor: string | undefined) {
-    this.call(id);
-    this.db
-      .prepare('UPDATE calls SET anchorMessageId=? WHERE id=?')
-      .run(anchor ?? null, id);
+  answerHandoffs(threadId: string, toolCallIds: string[]) {
+    for (const id of toolCallIds)
+      this.db
+        .prepare(
+          'UPDATE handoffs SET answered=1 WHERE threadId=? AND toolCallId=?',
+        )
+        .run(threadId, id);
   }
-  setCallError(id: string, error: string | null) {
-    this.call(id);
-    this.db.prepare('UPDATE calls SET error=? WHERE id=?').run(error, id);
-  }
-  saveCapture(threadId: string, value: unknown) {
+  transcript(threadId: string): TranscriptEntry[] {
     this.requireThread(threadId);
-    this.db
+    return this.db
       .prepare(
-        'INSERT INTO captures VALUES (?, ?) ON CONFLICT(threadId) DO UPDATE SET value=excluded.value',
+        'SELECT role, text, createdAt FROM transcripts WHERE threadId=? ORDER BY id',
       )
-      .run(threadId, JSON.stringify(value));
-  }
-  capture(threadId: string): unknown {
-    this.requireThread(threadId);
-    const row = this.db
-      .prepare('SELECT value FROM captures WHERE threadId=?')
-      .get(threadId);
-    return typeof row?.value === 'string' ? JSON.parse(row.value) : null;
+      .all(threadId) as unknown as TranscriptEntry[];
   }
 }

@@ -1,5 +1,4 @@
 export function createShutdown(options: {
-  stopRunner: () => void;
   stopPlatform: () => Promise<void>;
   closeServer: () => Promise<void>;
   exit: (code: number) => void;
@@ -14,11 +13,6 @@ export function createShutdown(options: {
         failed = true;
         options.report(operation, error);
       };
-      try {
-        options.stopRunner();
-      } catch (error) {
-        report('Stopping scheduler failed', error);
-      }
       let timer: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<void>((resolve) => {
         timer = setTimeout(() => {
@@ -35,8 +29,8 @@ export function createShutdown(options: {
       };
       await Promise.race([
         Promise.all([
-          settle('Stopping Channels failed', options.stopPlatform),
           settle('Closing HTTP server failed', options.closeServer),
+          settle('Closing conversation storage failed', options.stopPlatform),
         ]),
         deadline,
       ]);

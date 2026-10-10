@@ -1,106 +1,83 @@
 import { z } from 'zod';
+// A Dot's computer is its folder in the Hearth-Core workspace, where Claude Code works, plus an
+// optional container spun up through Hearth-backend.
 export const computerPermissionsSchema = z
   .object({
-    enabled: z.boolean(),
-    browser: z.boolean(),
     files: z.boolean(),
     shell: z.boolean(),
   })
   .strict();
 export type ComputerPermissions = z.infer<typeof computerPermissionsSchema>;
-export interface ComputerAudit {
+export const defaultPermissions: ComputerPermissions = {
+  files: true,
+  shell: false,
+};
+export interface ComputerActivity {
   id: string;
-  action: string;
-  actor: 'owner' | 'agent';
-  outcome: 'pending' | 'succeeded' | 'failed';
+  threadId: string | null;
+  /** Claude Code tool name: Bash, Write, Edit, Read, … or a page tool. */
+  tool: string;
+  /** The command or path the call acted on. */
+  summary: string;
+  /** Trimmed output, or the reason a call was denied. */
+  detail: string | null;
+  outcome: 'pending' | 'succeeded' | 'failed' | 'denied';
   createdAt: number;
 }
-export interface ComputerControl {
-  holder: 'bot' | 'human';
-  requested: boolean;
-  transitioning: boolean;
-  resumeSnapshotRequired: boolean;
-  request?: { id: string; status: string };
+export interface ContainerRecord {
+  name: string;
+  shortId: string | null;
+  template: string | null;
+  image: string | null;
+  status: string;
+  createdAt: number;
 }
 export interface ComputerStatus {
-  configured: boolean;
-  state: 'not_configured' | 'stopped' | 'running' | 'unavailable';
+  /** Running when Hearth-Core answers. */
+  state: 'running' | 'unavailable';
+  directory: string;
   permissions: ComputerPermissions;
-  audit: ComputerAudit[];
-  control?: ComputerControl;
+  container: ContainerRecord | null;
+  activity: ComputerActivity[];
   error?: string;
 }
-const path = z
+export interface WorkspaceListing {
+  directory: string;
+  exists: boolean;
+  /** POSIX paths relative to the Dot's folder; empty folders end with "/". */
+  files: string[];
+  truncated: boolean;
+}
+export interface WorkspaceFile {
+  path: string;
+  size: number;
+  modifiedAt: number;
+  binary: boolean;
+  truncated: boolean;
+  text: string | null;
+}
+const folderSegment = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
+/** A Dot's folder, relative to the workspace root: plain names joined by "/". */
+export const folderPath = z
   .string()
-  .max(1024)
+  .trim()
+  .min(1)
+  .max(200)
   .refine(
-    (p) =>
-      !p.startsWith('/') &&
-      !p.includes('\\') &&
-      !p.includes('\0') &&
-      !p.split('/').some((s) => s === '..'),
-    'Use a relative workspace path without traversal.',
+    (value) => value.split('/').every((part) => folderSegment.test(part)),
+    'Use a relative folder path made of letters, digits, ".", "_" and "-".',
   );
-const empty = z.object({}).strict();
-const ref = {
-  ref: z.string().min(1).max(100),
-  snapshotId: z.number().int().nonnegative(),
-};
-export const computerInputs = {
-  navigate: z
-    .object({
-      url: z
-        .string()
-        .url()
-        .max(2048)
-        .refine(
-          (s) =>
-            ['http:', 'https:'].includes(new URL(s).protocol) &&
-            !new URL(s).username &&
-            !new URL(s).password,
-        ),
-    })
-    .strict(),
-  read: empty,
-  snapshot: empty,
-  screenshot: empty,
-  click: z.object(ref).strict(),
-  type: z
-    .object({
-      ...ref,
-      text: z.string().max(16000),
-      submit: z.boolean().optional(),
-    })
-    .strict(),
-  key: z.object({ key: z.string().min(1).max(100) }).strict(),
-  scroll: z
-    .object({ deltaY: z.number().finite().min(-10000).max(10000) })
-    .strict(),
-  files_list: z.object({ path: path.default('') }).strict(),
-  files_read: z.object({ path: path.refine((p) => p.length > 0) }).strict(),
-  files_write: z
-    .object({
-      path: path.refine((p) => p.length > 0),
-      contents: z.string().max(100000),
-      append: z.boolean().optional(),
-    })
-    .strict(),
-  exec: z
-    .object({
-      command: z.string().trim().min(1).max(8000),
-      timeoutMs: z.number().int().min(1000).max(60000).default(30000),
-    })
-    .strict(),
-  human_click: z
-    .object({
-      x: z.number().finite().min(0).max(16000),
-      y: z.number().finite().min(0).max(16000),
-    })
-    .strict(),
-  human_type: z.object({ text: z.string().max(16000) }).strict(),
-  human_key: z.object({ key: z.string().min(1).max(100) }).strict(),
-  human_scroll: z
-    .object({ deltaY: z.number().finite().min(-10000).max(10000) })
-    .strict(),
-};
-export type ComputerAction = keyof typeof computerInputs;
+/** A file inside a Dot's folder: relative, no "..", no empty segments, no backslashes. */
+export const filePath = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine(
+    (value) =>
+      !value.startsWith('/') &&
+      !/[\\\0]/.test(value) &&
+      value
+        .split('/')
+        .every((part) => part !== '' && part !== '.' && part !== '..'),
+    'Use a path relative to this computer’s folder.',
+  );

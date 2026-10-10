@@ -14,7 +14,6 @@ export function SpaceWorkspace({
   onPage,
   onDirty,
   onRefresh,
-  onSchedule,
   onThread,
   onSettings,
   onCreateDot,
@@ -26,7 +25,6 @@ export function SpaceWorkspace({
   onPage: (id?: string) => void;
   onDirty: (value: boolean) => void;
   onRefresh: () => void;
-  onSchedule: (threadId: string) => void;
   onThread: (threadId: string) => void;
   onSettings: () => void;
   onCreateDot: () => void;
@@ -137,7 +135,6 @@ export function SpaceWorkspace({
             onSaved={saved}
             onDeleted={deleted}
             onRefresh={onRefresh}
-            onSchedule={onSchedule}
             onThread={onThread}
             onSettings={onSettings}
             onCreateDot={onCreateDot}
