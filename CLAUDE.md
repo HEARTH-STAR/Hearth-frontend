@@ -5,11 +5,15 @@
 - The Hearth web app: Spaces (pages), Dots (assistants), and each Dot's computer. Forked from
   CopilotKit/OpenDots (MIT, remote `upstream`); the CopilotKit React SDK, runtime and AG-UI stay.
 - Claude Code in Hearth-Core (`../Hearth-Core`) is the only intelligence. Containers come from Hearth-backend
-  (`../Hearth-backend`).
-- A Space is a container (Hearth-backend template `space`, running Hearth-Core on 5010). Creating a Space spins it
-  up; its setup is container → Claude Code sign-in → GitHub, both signed in inside the container through its
-  Hearth-Core. A Dot runs in its home Space (`dot.spaceId`): chat, files and permissions all go there. Do not reintroduce CopilotKit Intelligence, OpenAI/TanStack AI, OpenBot computers,
+  (`../Hearth-backend`). Do not reintroduce CopilotKit Intelligence, OpenAI/TanStack AI, OpenBot computers,
   voice, Slack, telemetry, Parallel research or MCP connections from upstream.
+- A Space is a container (Hearth-backend template `space`, running Hearth-Core on 5010), and each Dot is a Space:
+  `POST /api/dots` without a `spaceId` creates the Dot's own Space and starts its container. A Space that is
+  home to one Dot carries that Dot's name (`WorkspaceStore.nameSpacesAfterDots`, also on rename and at startup). Its
+  setup is container → Claude Code sign-in → GitHub, both signed in inside the container through its Hearth-Core.
+  A Dot runs in its Space (`dot.spaceId`): chat, files and permissions all go there.
+- The sidebar lists Dots only. A Dot's "…" menu (`DotMenu` in `Sidebar.tsx`) opens its Space's Setup page
+  (`#/spaces/:id/setup`) and its Pages (`#/spaces/:id`). Keep the mascots.
 - Vite + React client (`src/client`), Hono server (`src/server`), shared types (`src/shared`).
 
 ## Sibling repos (github.com/HEARTH-STAR, checked out side by side)

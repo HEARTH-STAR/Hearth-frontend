@@ -123,12 +123,9 @@ export function PageConversation({
   if (!online)
     return (
       <div className="document-chat-setup">
-        <span>
-          {dot.name} runs in the “{home?.name ?? 'home'}” Space, which is not
-          set up yet.
-        </span>
-        <a className="button" href={`#/spaces/${dot.spaceId}`}>
-          Set up {home?.name ?? 'the Space'}
+        <span>{dot.name} is not set up yet.</span>
+        <a className="button" href={`#/spaces/${dot.spaceId}/setup`}>
+          Set up {dot.name}
         </a>
       </div>
     );

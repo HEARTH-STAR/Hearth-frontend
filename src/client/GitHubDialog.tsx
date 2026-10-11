@@ -179,7 +179,7 @@ export function GitHubDialog({
     run('disconnect', async () => {
       if (
         !window.confirm(
-          `Disconnect GitHub from “${spaceName}”? The gh CLI in its container is signed out of github.com.`,
+          `Disconnect GitHub from ${spaceName}? The gh CLI in its container is signed out of github.com.`,
         )
       )
         return;
@@ -312,9 +312,9 @@ export function GitHubDialog({
         {status && !status.connected && !device && (
           <>
             <p className="muted">
-              Each Space connects one GitHub account. The gh CLI inside this
-              Space’s container holds it, and is signed out of any other
-              github.com account first.
+              {spaceName} connects one GitHub account. The gh CLI inside its
+              container holds it, and is signed out of any other github.com
+              account first.
             </p>
             <div className="github-option">
               <div>

@@ -42,13 +42,13 @@ function notReady(space: StoredSpace, probe: Probe) {
   const name = `“${space.name}”`;
   switch (probe.stage) {
     case 'none':
-      return `${name} has no container yet. Open the Space and start it.`;
+      return `${name} has no container yet. Start it from its Setup page.`;
     case 'creating':
       return `${name}’s container is being created.`;
     case 'booting':
       return `Hearth-Core is still starting in ${name}’s container.`;
     case 'stopped':
-      return `${name}’s container is stopped. Open the Space and start it.`;
+      return `${name}’s container is stopped. Start it from its Setup page.`;
     case 'unknown':
       return probe.error ?? 'Hearth-backend did not answer.';
     default:

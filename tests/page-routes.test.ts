@@ -205,7 +205,6 @@ it('answers malformed JSON and invalid Space access with 400 on workspace routes
   }
   const body = {
     name: dot.name,
-    role: dot.role,
     instructions: dot.instructions,
     spaceId: dot.spaceId,
   };

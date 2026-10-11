@@ -393,17 +393,31 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dot-row-edit {
+.dot-menu {
   position: absolute;
   right: 6px;
   top: 6px;
+}
+.dot-row-edit {
   padding: 3px;
   background: var(--side);
   opacity: 0;
 }
 .dot-row:hover .dot-row-edit,
-.dot-row-edit:focus-visible {
+.dot-row-edit:focus-visible,
+.dot-menu.open .dot-row-edit {
   opacity: 1;
+}
+.dot-menu .menu-popover {
+  width: 196px;
+}
+.menu-popover button small {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
 }
 .dot-row.active .dot-row-edit {
   background: var(--lavender);
@@ -482,13 +496,6 @@ code {
 .dot-header-text strong {
   font-size: 14.5px;
   font-weight: 600;
-}
-.dot-header-text span {
-  font-size: 12px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .dot-header-actions {
   margin-left: auto;
@@ -919,29 +926,6 @@ code {
   font-size: 22px;
   margin: 6px 0 0;
 }
-.new-role {
-  font-size: 12px;
-  color: var(--muted);
-}
-.new-conversation p {
-  max-width: 460px;
-  margin: 8px 0 0;
-  font-size: 13px;
-  color: #6b6d75;
-}
-.starter-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 18px;
-}
-.starter-suggestions button {
-  font-size: 12.5px;
-  color: #55575f;
-  padding: 7px 11px;
-  border-radius: 999px;
-}
 
 /* Computer panel */
 .computer {
@@ -1189,48 +1173,6 @@ code {
 .activity-list time {
   font-size: 11px;
   color: var(--muted);
-}
-.computer-note {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 12px 16px 0;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #f0eee9;
-}
-.computer-note p {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #6b6d75;
-}
-.computer-note code {
-  overflow-wrap: anywhere;
-}
-.computer-note button {
-  padding: 5px 10px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.computer-note .container-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 5px;
-  max-width: 100%;
-  padding: 3px 8px;
-  border-color: transparent;
-  background: transparent;
-  font-size: 11.5px;
-  color: #55575f;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.computer-note .container-pill:hover:not(:disabled) {
-  background: #e8e6e1;
 }
 .computer-perms {
   padding: 12px 16px 16px;

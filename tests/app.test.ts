@@ -214,7 +214,8 @@ describe('workspace', () => {
       stage: 'ready',
       claude: true,
     });
-    expect(body.dots[0]).toMatchObject({ name: 'Scout', role: 'Researcher' });
+    expect(body.dots[0].name).toBe('Scout');
+    expect(body.dots[0]).not.toHaveProperty('role');
     expect(body.dots[0].directory).toMatch(/^dots\/scout-[0-9a-f]{8}$/);
     expect(body.setup.backend).toMatchObject({
       reachable: true,
@@ -251,13 +252,12 @@ describe('workspace', () => {
       'Hearth-backend at http://backend.test',
     ]);
   });
-  it('creates and edits Dots with a role and a safe working folder', async () => {
+  it('creates and edits Dots with a safe working folder and no role', async () => {
     const { app, workspace } = fixture();
     const spaceId = workspace.spaces()[0].id;
     const dot = {
       spaceId,
       name: 'Quill',
-      role: 'Writer',
       instructions: 'Write the launch brief.',
     };
     const created = await (await app.request('/api/dots', json(dot))).json();
@@ -276,7 +276,15 @@ describe('workspace', () => {
         json({ ...dot, directory: 'team/quill' }, 'PUT'),
       )
     ).json();
-    expect(edited).toMatchObject({ directory: 'team/quill', role: 'Writer' });
+    expect(edited).toMatchObject({ directory: 'team/quill', name: 'Quill' });
+    expect(
+      (
+        await app.request(
+          `/api/dots/${created.id}`,
+          json({ ...dot, role: 'Writer' }, 'PUT'),
+        )
+      ).status,
+    ).toBe(400);
     const conversation = await app.request(
       '/api/conversations',
       json({ dotId: created.id, title: 'Brief' }),

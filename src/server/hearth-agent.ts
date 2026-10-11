@@ -102,7 +102,7 @@ export function systemPrompt(input: {
 }) {
   const { dot, settings, spaces, page, review } = input;
   return [
-    `You are ${dot.name}${dot.role ? `, a ${dot.role}` : ''}: an assistant (a "Dot") in ${settings.name}'s Hearth workspace.`,
+    `You are ${dot.name}: an assistant (a "Dot") in ${settings.name}'s Hearth workspace.`,
     `Role instructions from the owner: ${dot.instructions}`,
     `Spaces hold the owner's pages. You may use: ${spaces.map((space) => `${space.name} (id ${space.id})`).join(', ') || 'none'}. Save new pages to ${spaces.find((space) => space.id === dot.spaceId)?.name ?? 'your default Space'} (id ${dot.spaceId}) unless asked otherwise.`,
     review

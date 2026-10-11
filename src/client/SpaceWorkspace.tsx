@@ -7,8 +7,11 @@ import { SpaceLibrary } from './SpaceLibrary';
 import { SpaceSetup } from './SpaceSetup';
 import { PageDocument } from './PageDocument';
 import { PageOutline } from './PageOutline';
+export type SpaceSection = 'pages' | 'setup';
+/** A Dot's Space: its Setup page (container, Claude Code, GitHub) or its Pages, and one page. */
 export function SpaceWorkspace({
   space,
+  section,
   pageId,
   workspace,
   paused,
@@ -19,6 +22,7 @@ export function SpaceWorkspace({
   onCreateDot,
 }: {
   space: Space;
+  section: SpaceSection;
   pageId?: string;
   workspace: WorkspaceState;
   paused: boolean;
@@ -34,6 +38,7 @@ export function SpaceWorkspace({
   const [loaded, setLoaded] = useState(false);
   const [outline, setOutline] = useState(false);
   useEffect(() => {
+    if (section === 'setup') return;
     let active = true;
     const load = async () => {
       try {
@@ -56,7 +61,7 @@ export function SpaceWorkspace({
       active = false;
       clearInterval(timer);
     };
-  }, [space.id]);
+  }, [space.id, section]);
   const page = pages.find((item) => item.id === pageId);
   const saved = useCallback(
     (next: Page) =>
@@ -100,11 +105,21 @@ export function SpaceWorkspace({
           {error}
         </div>
       )}
-      {!pageId ? (
+      {section === 'setup' ? (
+        <section className="space-library" aria-label={`${space.name} setup`}>
+          <header className="library-heading">
+            <div>
+              <span className="library-eyebrow">SPACE</span>
+              <h1>{space.name}</h1>
+              {space.description && <p>{space.description}</p>}
+            </div>
+          </header>
+          <SpaceSetup space={space} onChanged={onRefresh} />
+        </section>
+      ) : !pageId ? (
         <SpaceLibrary
           space={space}
           pages={pages}
-          setup={<SpaceSetup space={space} onChanged={onRefresh} />}
           onPage={onPage}
           onNew={() => void create(null)}
         />

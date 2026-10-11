@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Conversation, Dot, StoredSpace } from '../shared/types.js';
-export type DotInput = Pick<Dot, 'name' | 'role' | 'instructions'> & {
+export type DotInput = Pick<Dot, 'name' | 'instructions'> & {
   spaceId: string;
   spaceIds?: string[];
   directory?: string;
@@ -52,17 +52,36 @@ export class WorkspaceStore {
       this.spaces().some((space) => space.id === id),
     );
     if (!this.spaces().length) {
-      const space = this.createSpace(
-        'Everyday',
-        'A little space for your day.',
-      );
+      const space = this.createSpace('Scout', '');
       this.createDot({
         spaceId: space.id,
         name: 'Scout',
-        role: 'Researcher',
         instructions:
           'Be thoughtful, practical, and concise. Read what is in your folder before answering, keep notes as Markdown files, and show drafts for review before saving them to a Space.',
       });
+    }
+    this.nameSpacesAfterDots();
+  }
+  /**
+   * Each Dot is a Space, so a Space that is home to one Dot carries that Dot's name. Spaces made
+   * before that rule (the first one was "Everyday", next to "Scout") are renamed once here, and
+   * their old seeded description goes with it.
+   */
+  private nameSpacesAfterDots() {
+    const homes = new Map<string, Dot[]>();
+    for (const dot of this.dots())
+      homes.set(dot.spaceId, [...(homes.get(dot.spaceId) ?? []), dot]);
+    for (const space of this.spaces()) {
+      const dots = homes.get(space.id);
+      if (dots?.length !== 1) continue;
+      if (space.name !== dots[0].name)
+        this.db
+          .prepare('UPDATE spaces SET name=? WHERE id=?')
+          .run(dots[0].name, space.id);
+      if (space.description === 'A little space for your day.')
+        this.db
+          .prepare("UPDATE spaces SET description='' WHERE id=?")
+          .run(space.id);
     }
   }
   close() {
@@ -106,10 +125,10 @@ export class WorkspaceStore {
       .run(spaceId, name, Date.now());
   }
   dots(): Dot[] {
-    // memoryAllowed is a leftover column: older databases have it, nothing reads it.
+    // role and memoryAllowed are leftover columns: older databases have them, nothing reads them.
     return this.db
       .prepare(
-        'SELECT id, spaceId, name, role, instructions, directory, createdAt FROM dots ORDER BY createdAt',
+        'SELECT id, spaceId, name, instructions, directory, createdAt FROM dots ORDER BY createdAt',
       )
       .all()
       .map((row) => ({
@@ -134,7 +153,6 @@ export class WorkspaceStore {
       spaceId: input.spaceId,
       spaceIds,
       name: input.name,
-      role: input.role,
       instructions: input.instructions,
       directory:
         input.directory ?? `dots/${slug(input.name)}-${id.slice(0, 8)}`,
@@ -147,7 +165,7 @@ export class WorkspaceStore {
           dot.id,
           dot.spaceId,
           dot.name,
-          dot.role,
+          '',
           dot.instructions,
           dot.directory,
           0,
@@ -172,20 +190,15 @@ export class WorkspaceStore {
     this.transaction(() => {
       this.db
         .prepare(
-          'UPDATE dots SET spaceId=?, name=?, role=?, instructions=?, directory=? WHERE id=?',
+          'UPDATE dots SET spaceId=?, name=?, instructions=?, directory=? WHERE id=?',
         )
-        .run(
-          next.spaceId,
-          next.name,
-          next.role,
-          next.instructions,
-          next.directory,
-          id,
-        );
+        .run(next.spaceId, next.name, next.instructions, next.directory, id);
       this.db.prepare('DELETE FROM dot_spaces WHERE dotId=?').run(id);
       for (const space of spaceIds)
         this.db.prepare('INSERT INTO dot_spaces VALUES (?, ?)').run(id, space);
     });
+    // A renamed Dot renames its own Space.
+    this.nameSpacesAfterDots();
     return this.dot(id)!;
   }
   canAccessSpace(dotId: string, spaceId: string) {

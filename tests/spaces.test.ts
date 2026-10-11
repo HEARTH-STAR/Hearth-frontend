@@ -296,6 +296,45 @@ it('signs Claude Code in inside the Space through its Hearth-Core', async () => 
     await (await app.request(`${base}/logout`, json({}))).json(),
   ).toMatchObject({ connected: false });
 });
+it('gives each new Dot its own Space and starts its container', async () => {
+  const fake = docker();
+  const { app, backend, platform, workspace } = fixture({
+    backend: fake.routes,
+  });
+  const before = workspace.spaces().length;
+  const response = await app.request(
+    '/api/dots',
+    json({ name: 'Quill', instructions: 'Write briefs.' }),
+  );
+  expect(response.status).toBe(201);
+  const dot = await response.json();
+  const space = workspace.space(dot.spaceId)!;
+  expect(space).toMatchObject({ name: 'Quill', description: '' });
+  expect(dot.spaceIds).toEqual([space.id]);
+  expect(workspace.spaces()).toHaveLength(before + 1);
+  expect(
+    backend.calls.find((call) => call.path === '/api/containers')?.body,
+  ).toEqual({ name: `quill-${space.id.slice(0, 8)}`, template: 'space' });
+  await platform.spaces.settled(space.id);
+  expect(
+    (await (await app.request(`/api/spaces/${space.id}/setup`)).json()).stage,
+  ).toBe('ready');
+  // an edit without a Space keeps the Dot where it is
+  const edited = await (
+    await app.request(
+      `/api/dots/${dot.id}`,
+      json({ name: 'Quill', instructions: 'Write shorter briefs.' }, 'PUT'),
+    )
+  ).json();
+  expect(edited).toMatchObject({ spaceId: space.id, spaceIds: [space.id] });
+  // access to a Space that does not exist creates nothing
+  const refused = await app.request(
+    '/api/dots',
+    json({ name: 'Ghost', instructions: 'Nothing.', spaceIds: ['nope'] }),
+  );
+  expect(refused.status).toBe(400);
+  expect(workspace.spaces()).toHaveLength(before + 1);
+});
 it('keeps Claude Code sign-in waiting until the container runs', async () => {
   const { app, workspace, core } = fixture({ container: false });
   const space = workspace.spaces()[0];

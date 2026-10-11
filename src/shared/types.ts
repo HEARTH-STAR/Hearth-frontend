@@ -41,8 +41,6 @@ export interface Dot {
   spaceId: string;
   spaceIds: string[];
   name: string;
-  /** A short label under the name, such as "Researcher". */
-  role: string;
   instructions: string;
   /** This Dot's folder in the Hearth-Core workspace: its computer's files. */
   directory: string;

@@ -196,7 +196,7 @@ export function SpaceSetup({
     run('logout', async () => {
       if (
         !window.confirm(
-          `Sign Claude Code out of “${space.name}”? Its Dots cannot run until you sign in again.`,
+          `Sign Claude Code out of ${space.name}? It cannot run until you sign in again.`,
         )
       )
         return;
@@ -223,7 +223,7 @@ export function SpaceSetup({
         <h2>{complete ? 'This Space is ready.' : 'Set up this Space'}</h2>
         <p>
           {space.name} runs in its own container. Claude Code and GitHub are
-          signed in inside it, for every Dot whose home is this Space.
+          signed in inside it.
         </p>
       </header>
       {error && (
@@ -303,7 +303,7 @@ export function SpaceSetup({
                     ? claude.error
                     : claude && !claude.loginSupported
                       ? 'Sign-in needs a Linux container; this Hearth-Core cannot run it.'
-                      : 'Sign in with your Claude account. Dots run on it.'}
+                      : `Sign in with your Claude account. ${space.name} runs on it.`}
             </span>
             {login && (
               <form
@@ -390,7 +390,7 @@ export function SpaceSetup({
                 ? 'Connects once the container runs.'
                 : github?.connected
                   ? `@${github.username}`
-                  : 'Connect the account this Space’s Dots work with. Optional.'}
+                  : `Connect the account ${space.name} works with. Optional.`}
             </span>
           </div>
           {ready && (

@@ -11,17 +11,6 @@ export const STAGE_LABEL: Record<SpaceStage, string> = {
   failed: 'Did not start',
   unknown: 'Hearth-backend not answering',
 };
-/** Completes "…whose container is ___." */
-export const STAGE_PHRASE: Record<SpaceStage, string> = {
-  none: 'not started yet',
-  creating: 'still being created',
-  booting: 'still starting Hearth-Core',
-  ready: 'running',
-  stopped: 'stopped',
-  missing: 'missing from Docker',
-  failed: 'not running',
-  unknown: 'out of reach: Hearth-backend is not answering',
-};
 /** The container needs a start from the owner. */
 export const startable = (stage: SpaceStage) =>
   stage === 'none' ||

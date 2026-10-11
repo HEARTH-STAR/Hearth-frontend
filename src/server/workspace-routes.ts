@@ -6,11 +6,11 @@ import { Platform } from './platform.js';
 const dotSchema = z
   .object({
     name: z.string().trim().min(1).max(40),
-    role: z.string().trim().max(40).default(''),
     instructions: z.string().trim().min(3).max(2000),
     directory: folderPath.optional(),
     spaceIds: z.array(z.string().min(1)).min(1).max(100).optional(),
-    spaceId: z.string().min(1),
+    /** The Dot's home Space. A new Dot without one gets its own; an edit without one keeps it. */
+    spaceId: z.string().min(1).optional(),
   })
   .strict();
 export function workspaceRoutes(platform: Platform) {
@@ -31,11 +31,28 @@ export function workspaceRoutes(platform: Platform) {
   app.post('/dots', async (c) => {
     const data = dotSchema.safeParse(await c.req.json().catch(() => null));
     if (!data.success)
+      return c.json({ error: 'Provide a name and role instructions.' }, 400);
+    const { spaceId, spaceIds = [], ...dot } = data.data;
+    if (spaceId)
       return c.json(
-        { error: 'Provide a name, role instructions, and Space access.' },
+        platform.workspace.createDot({ ...data.data, spaceId }),
+        201,
+      );
+    // Each Dot is a Space: it gets its own, and that Space's container starts now.
+    if (spaceIds.some((id) => !platform.workspace.space(id)))
+      return c.json(
+        { error: 'Space access must include a valid default destination.' },
         400,
       );
-    return c.json(platform.workspace.createDot(data.data), 201);
+    const home = platform.spaces.create(dot.name, '').id;
+    return c.json(
+      platform.workspace.createDot({
+        ...dot,
+        spaceId: home,
+        spaceIds: [home, ...spaceIds],
+      }),
+      201,
+    );
   });
   app.put('/dots/:id', async (c) => {
     const data = dotSchema.safeParse(await c.req.json().catch(() => null));

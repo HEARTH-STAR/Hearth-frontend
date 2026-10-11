@@ -1,30 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import type { Dot, State, StoredSpace, WorkspaceState } from '../shared/types';
+import type { Dot, State, WorkspaceState } from '../shared/types';
 import { STAGE_LABEL } from './space-stage';
 import {
   setThemePreference,
   themePreference,
   type ThemePreference,
 } from './theme';
-export type Dialog =
-  | { type: 'space' }
-  | { type: 'dot'; dot?: Dot; spaceId: string }
-  | { type: 'settings' };
+export type Dialog = { type: 'dot'; dot?: Dot } | { type: 'settings' };
 export function WorkspaceDialog({
   dialog,
   state,
   workspace,
   onClose,
-  onSpaceCreated,
+  onDotCreated,
   mutate,
 }: {
   dialog: Dialog;
   state: State;
   workspace: WorkspaceState;
   onClose: () => void;
-  /** A new Space was saved; its container is starting. */
-  onSpaceCreated?: (space: StoredSpace) => void;
+  /** A new Dot was saved, with its own Space whose container is starting. */
+  onDotCreated?: (dot: Dot) => void;
   /** The saved value, or false when saving failed. */
   mutate: (path: string, method: string, body?: unknown) => Promise<unknown>;
 }) {
@@ -36,18 +33,13 @@ export function WorkspaceDialog({
         ? state.settings.name
         : '',
   );
-  const [role, setRole] = useState(editing?.role ?? '');
   const [directory, setDirectory] = useState(editing?.directory ?? '');
   const [text, setText] = useState(
     dialog.type === 'dot' ? (editing?.instructions ?? '') : '',
   );
   const [paused, setPaused] = useState(state.settings.paused);
-  const [spaceIds, setSpaceIds] = useState(
-    dialog.type === 'dot' ? (editing?.spaceIds ?? [dialog.spaceId]) : [],
-  );
-  const [defaultSpace, setDefaultSpace] = useState(
-    dialog.type === 'dot' ? (editing?.spaceId ?? dialog.spaceId) : '',
-  );
+  const [spaceIds, setSpaceIds] = useState(editing?.spaceIds ?? []);
+  const [defaultSpace, setDefaultSpace] = useState(editing?.spaceId ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [theme, setTheme] = useState(themePreference);
@@ -84,13 +76,11 @@ export function WorkspaceDialog({
     };
   }, []);
   const title =
-    dialog.type === 'space'
-      ? 'A space for something.'
-      : dialog.type === 'dot'
-        ? editing
-          ? `Make ${editing.name} yours.`
-          : 'Meet your next specialist.'
-        : 'Your workspace, your rules.';
+    dialog.type === 'dot'
+      ? editing
+        ? `Make ${editing.name} yours.`
+        : 'Meet your next specialist.'
+      : 'Your workspace, your rules.';
   const { backend } = workspace.setup;
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -119,18 +109,13 @@ export function WorkspaceDialog({
             let path = '',
               method = 'POST',
               body: unknown;
-            if (dialog.type === 'space') {
-              path = '/spaces';
-              body = { name, description: text };
-            }
             if (dialog.type === 'dot') {
               path = editing ? `/dots/${editing.id}` : '/dots';
               method = editing ? 'PUT' : 'POST';
               body = {
-                spaceId: defaultSpace,
-                spaceIds,
+                // A new Dot gets its own Space; an edit keeps its home and access.
+                ...(editing ? { spaceId: defaultSpace, spaceIds } : {}),
                 name,
-                role,
                 instructions: text,
                 ...(directory.trim() ? { directory: directory.trim() } : {}),
               };
@@ -142,8 +127,12 @@ export function WorkspaceDialog({
             }
             const saved = await mutate(path, method, body);
             if (saved) {
-              if (dialog.type === 'space' && typeof saved === 'object')
-                onSpaceCreated?.(saved as StoredSpace);
+              if (
+                dialog.type === 'dot' &&
+                !editing &&
+                typeof saved === 'object'
+              )
+                onDotCreated?.(saved as Dot);
               onClose();
             } else setError('Could not save. Review the error and retry.');
             setBusy(false);
@@ -161,53 +150,29 @@ export function WorkspaceDialog({
           />
           {dialog.type === 'dot' && (
             <>
-              <label className="field-label" htmlFor="dot-role">
-                Role
-              </label>
-              <input
-                id="dot-role"
-                value={role}
-                maxLength={40}
-                placeholder="Researcher"
-                onChange={(e) => setRole(e.target.value)}
-              />
-            </>
-          )}
-          {dialog.type !== 'settings' && (
-            <>
               <label className="field-label" htmlFor="entity-text">
-                {dialog.type === 'dot'
-                  ? 'Role instructions'
-                  : 'What belongs here?'}
+                Instructions
               </label>
               <textarea
                 id="entity-text"
                 rows={4}
                 maxLength={2000}
-                required={dialog.type !== 'space'}
+                required
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder={
-                  dialog.type === 'dot'
-                    ? 'You are a thoughtful research partner. Compare evidence and be clear about uncertainty.'
-                    : ''
-                }
+                placeholder="How this Dot should work, e.g. keep notes as Markdown files and show drafts before saving."
               />
-              {dialog.type === 'space' && (
+              {!editing && (
                 <p className="muted">
-                  Hearth starts a container for this Space through
-                  Hearth-backend. Then sign in to Claude Code and connect GitHub
-                  inside it, from the Space’s page. The first Space builds the
-                  image, which can take a few minutes.
+                  Each Dot is its own Space: Hearth starts a container for it
+                  through Hearth-backend. Then sign in to Claude Code and
+                  connect GitHub inside it, from its Setup page. The first one
+                  builds the image, which can take a few minutes.
                   {backend.reachable && backend.docker !== false
                     ? ''
-                    : ` ${backend.reachable ? 'Docker is not running' : 'Hearth-backend is not answering'} right now, so the container starts once you start it again from the Space.`}
+                    : ` ${backend.reachable ? 'Docker is not running' : 'Hearth-backend is not answering'} right now, so start the container from the Setup page later.`}
                 </p>
               )}
-            </>
-          )}
-          {dialog.type === 'dot' && (
-            <>
               <label className="field-label" htmlFor="dot-directory">
                 Working folder
               </label>
@@ -220,54 +185,56 @@ export function WorkspaceDialog({
                 onChange={(e) => setDirectory(e.target.value)}
               />
               <p className="muted">
-                Inside the home Space’s container. Claude Code works here, and
-                the computer’s Files tab shows it. Changing it starts new
+                Inside its Space’s container. Claude Code works here, and the
+                computer’s Files tab shows it. Changing it starts new
                 conversations fresh.
               </p>
-              <fieldset className="space-access-fields">
-                <legend>Space access</legend>
-                <p className="muted">
-                  Choose where this Dot can read and edit pages.
-                </p>
-                {workspace.spaces.map((space) => (
-                  <label className="permission-row" key={space.id}>
-                    <input
-                      type="checkbox"
-                      checked={spaceIds.includes(space.id)}
-                      onChange={(event) => {
-                        const next = event.target.checked
-                          ? [...spaceIds, space.id]
-                          : spaceIds.filter((id) => id !== space.id);
-                        setSpaceIds(next);
-                        if (!next.includes(defaultSpace))
-                          setDefaultSpace(next[0] ?? '');
-                      }}
-                    />
-                    <span>{space.name}</span>
+              {editing && (
+                <fieldset className="space-access-fields">
+                  <legend>Space access</legend>
+                  <p className="muted">
+                    Choose where this Dot can read and edit pages.
+                  </p>
+                  {workspace.spaces.map((space) => (
+                    <label className="permission-row" key={space.id}>
+                      <input
+                        type="checkbox"
+                        checked={spaceIds.includes(space.id)}
+                        onChange={(event) => {
+                          const next = event.target.checked
+                            ? [...spaceIds, space.id]
+                            : spaceIds.filter((id) => id !== space.id);
+                          setSpaceIds(next);
+                          if (!next.includes(defaultSpace))
+                            setDefaultSpace(next[0] ?? '');
+                        }}
+                      />
+                      <span>{space.name}</span>
+                    </label>
+                  ))}
+                  <label className="field-label" htmlFor="default-space">
+                    Home Space: the Dot runs in its container, and saves pages
+                    there by default
                   </label>
-                ))}
-                <label className="field-label" htmlFor="default-space">
-                  Home Space: the Dot runs in its container, and saves pages
-                  there by default
-                </label>
-                <select
-                  id="default-space"
-                  value={defaultSpace}
-                  required
-                  onChange={(event) => setDefaultSpace(event.target.value)}
-                >
-                  <option value="" disabled>
-                    Choose a Space
-                  </option>
-                  {workspace.spaces
-                    .filter((space) => spaceIds.includes(space.id))
-                    .map((space) => (
-                      <option key={space.id} value={space.id}>
-                        {space.name}
-                      </option>
-                    ))}
-                </select>
-              </fieldset>
+                  <select
+                    id="default-space"
+                    value={defaultSpace}
+                    required
+                    onChange={(event) => setDefaultSpace(event.target.value)}
+                  >
+                    <option value="" disabled>
+                      Choose a Space
+                    </option>
+                    {workspace.spaces
+                      .filter((space) => spaceIds.includes(space.id))
+                      .map((space) => (
+                        <option key={space.id} value={space.id}>
+                          {space.name}
+                        </option>
+                      ))}
+                  </select>
+                </fieldset>
+              )}
             </>
           )}
           {dialog.type === 'settings' && (

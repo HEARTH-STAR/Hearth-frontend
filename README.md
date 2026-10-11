@@ -62,34 +62,35 @@ From the folder that holds the repos (Hearth-Core runs inside each Space, not he
 
 Production: `npm run build && npm start` serves everything on `http://127.0.0.1:4310`.
 
-Then set up a Space. The first one, Everyday, is there already; **+** next to SPACES adds more.
-Open it and follow its setup card:
+Each Dot is a Space: its own container, under the Dot's name. The first Dot, Scout, is there
+already; **+** next to DOTS adds more. A Dot's **…** menu opens its **Setup** and **Pages**.
+Follow the Setup page:
 
-1. **Container**: a new Space starts its container at once (Everyday has a **Start container**
+1. **Container**: a new Dot starts its container at once (Scout has a **Start container**
    button). The first one builds the `space` image and its first start installs Hearth-Core's
-   packages; both take a few minutes. The dot next to the Space in the sidebar turns green once
-   everything is ready.
+   packages; both take a few minutes.
 2. **Claude Code**: **Sign in to Claude**, approve on claude.com, and paste the code it shows.
    Hearth-Core runs `claude auth login` inside the container, so the login lives there.
 3. **GitHub** (optional): a one-time code or a personal access token, for the gh CLI inside the
    container.
 
-A Dot runs in its home Space's container. Until that Space is ready, its conversation says what
-is missing and links to the setup.
+A Dot runs in its Space's container. Until that Space is ready, its message box waits; the
+Setup page shows what is missing.
 
 ## What is where
 
 | Surface              | What it shows                                                                                                                            | Backed by                                                      |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Sidebar              | Search, Spaces with page counts and a ready dot, Dots with their latest conversation, Settings                                           | this server's SQLite                                           |
-| Space setup          | The Space's container, then Claude Code sign-in (link + pasted code), then GitHub                                                        | Hearth-backend, then the Space's Hearth-Core                   |
+| Sidebar              | Search, Dots with their latest conversation; each Dot's **…** menu (Setup, Pages), Settings                                              | this server's SQLite                                           |
+| Setup (Dot menu)     | The Dot's Space: its container, then Claude Code sign-in (link + pasted code), then GitHub                                               | Hearth-backend, then the Space's Hearth-Core                   |
+| Pages (Dot menu)     | The Dot's Space's pages                                                                                                                  | this server's SQLite                                           |
 | Conversation         | Your messages, Claude Code's replies, one row per tool call ("Saved file ~/notes/a.md · 2.1 KB", "Ran wc -l … → 41 lines"), review cards | the home Space's Hearth-Core `POST /api/chat`                  |
 | Review before saving | A draft with **Approve & save** / **Decline**; only approval saves the page                                                              | CopilotKit human-in-the-loop                                   |
 | Computer: Files      | The Dot's folder in its home Space's container, as a tree (`@pierre/trees`); click a file to read it                                     | the home Space's Hearth-Core `/api/workspace/*`                |
 | Computer: Terminal   | Commands the Dot ran and their output                                                                                                    | recorded from the chat stream                                  |
 | Computer: Activity   | Every tool call, with its outcome (succeeded, failed, denied)                                                                            | recorded from the chat stream                                  |
 | Permissions          | Files (edits), Shell (Bash)                                                                                                              | sent with every turn; Hearth-Core enforces them                |
-| GitHub (Space setup) | The Space's GitHub account; connect with a one-time code or a personal access token, re-check, disconnect                                | the Space's Hearth-Core `/api/connectors/github/*` (gh inside) |
+| GitHub (Setup)       | The Space's GitHub account; connect with a one-time code or a personal access token, re-check, disconnect                                | the Space's Hearth-Core `/api/connectors/github/*` (gh inside) |
 
 ## How a turn runs
 

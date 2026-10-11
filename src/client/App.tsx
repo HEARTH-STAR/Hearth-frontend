@@ -1,15 +1,9 @@
 import { openPageLink } from './page-navigation';
-import { SpaceWorkspace } from './SpaceWorkspace';
+import { SpaceWorkspace, type SpaceSection } from './SpaceWorkspace';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
-import { ArrowUpRight, Menu, Monitor, MoreHorizontal, X } from 'lucide-react';
-import type {
-  Conversation,
-  Dot,
-  State,
-  StoredSpace,
-  WorkspaceState,
-} from '../shared/types';
+import { Menu, Monitor, X } from 'lucide-react';
+import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
 import {
   applyRefreshResult,
@@ -23,7 +17,6 @@ import { ComputerPanel } from './ComputerPanel';
 import { ConversationMenu } from './ConversationMenu';
 import { DotHeader } from './DotHeader';
 import { latestConversation, Sidebar } from './Sidebar';
-import { STAGE_PHRASE } from './space-stage';
 import { WorkspaceDialog, type Dialog } from './WorkspaceDialog';
 
 function describeFailure(error: unknown, fallback: string) {
@@ -33,11 +26,6 @@ function describeFailure(error: unknown, fallback: string) {
     message: error instanceof Error ? error.message : fallback,
   };
 }
-const STARTERS = [
-  'Summarize what is in your folder',
-  'Draft notes I can review before saving',
-  'Make a plan I can follow',
-];
 export function App() {
   const [state, setState] = useState<State>();
   const [workspace, setWorkspace] = useState<WorkspaceState>();
@@ -46,6 +34,7 @@ export function App() {
   const [view, rawSetView] = useState<'chat' | 'space'>('chat');
   const dirtyPage = useRef(false);
   const [spaceId, setSpaceId] = useState('');
+  const [section, setSection] = useState<SpaceSection>('pages');
   const [pageId, setPageId] = useState<string>();
   const setDirtyPage = useCallback((value: boolean) => {
     dirtyPage.current = value;
@@ -63,7 +52,7 @@ export function App() {
     let acceptedHash = location.hash;
     const navigate = () => {
       const match = location.hash.match(
-        /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+))?$/,
+        /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+)|\/(setup))?$/,
       );
       if (!match) return;
       if (dirtyPage.current && location.hash === acceptedHash) return;
@@ -78,6 +67,7 @@ export function App() {
       dirtyPage.current = false;
       setSpaceId(match[1]);
       setPageId(match[2]);
+      setSection(match[3] ? 'setup' : 'pages');
       rawSetView('space');
       setMobile(false);
     };
@@ -88,6 +78,8 @@ export function App() {
   const openPage = (space: string, page?: string) => {
     openPageLink(`#/spaces/${space}${page ? `/pages/${page}` : ''}`);
   };
+  /** Each Dot is a Space; its Setup page holds the container, Claude Code and GitHub. */
+  const openSetup = (space: string) => openPageLink(`#/spaces/${space}/setup`);
   const [notices, setNotices] = useState<Notices>({
     refresh: '',
     capture: '',
@@ -307,19 +299,17 @@ export function App() {
           workspace={workspace}
           open={mobile}
           search={search}
-          activeDot={view === 'chat' ? dot.id : undefined}
-          activeSpace={view === 'space' ? spaceId : undefined}
+          activeDot={
+            view === 'chat'
+              ? dot.id
+              : workspace.dots.find((item) => item.spaceId === spaceId)?.id
+          }
           onSearch={setSearch}
           onNew={() => void newConversation()}
           onDot={chooseDot}
-          onEditDot={(item) =>
-            setDialog({ type: 'dot', dot: item, spaceId: item.spaceId })
-          }
-          onCreateDot={() =>
-            setDialog({ type: 'dot', spaceId: workspace.spaces[0].id })
-          }
-          onSpace={(id) => openPage(id)}
-          onCreateSpace={() => setDialog({ type: 'space' })}
+          onCreateDot={() => setDialog({ type: 'dot' })}
+          onSetup={openSetup}
+          onPages={(id) => openPage(id)}
           onSettings={() => setDialog({ type: 'settings' })}
         />
         <div className="main">
@@ -340,20 +330,10 @@ export function App() {
               All Dots are paused. Resume them in Settings.
             </div>
           )}
-          {!online && view === 'chat' && home && (
-            <div className="notice">
-              {dot.name} runs in the “{home.name}” Space,{' '}
-              {home.stage === 'ready'
-                ? 'where Claude Code is not signed in yet.'
-                : `whose container is ${STAGE_PHRASE[home.stage]}.`}{' '}
-              <button className="text-button" onClick={() => openPage(home.id)}>
-                Set up {home.name}
-              </button>
-            </div>
-          )}
           {view === 'space' ? (
             <SpaceWorkspace
-              key={spaceId}
+              key={`${spaceId}:${section}`}
+              section={section}
               space={
                 workspace.spaces.find((s) => s.id === spaceId) ??
                 workspace.spaces[0]
@@ -362,7 +342,7 @@ export function App() {
               workspace={workspace}
               paused={paused}
               onPage={(id) => openPage(spaceId, id)}
-              onCreateDot={() => setDialog({ type: 'dot', spaceId })}
+              onCreateDot={() => setDialog({ type: 'dot' })}
               onDirty={setDirtyPage}
               onRefresh={refresh}
               onThread={(id) => {
@@ -396,13 +376,6 @@ export function App() {
                 dot={dot}
                 online={online}
                 state={paused ? 'paused' : 'idle'}
-                status={
-                  paused
-                    ? 'paused'
-                    : online
-                      ? 'computer running'
-                      : 'needs setup'
-                }
               >
                 {conversationMenu}
                 <button
@@ -422,28 +395,6 @@ export function App() {
                     state={paused ? 'paused' : 'idle'}
                   />
                   <h2>{dot.name}</h2>
-                  {dot.role && <span className="new-role">{dot.role}</span>}
-                  <p>{dot.instructions}</p>
-                  <button
-                    className="text-button"
-                    onClick={() =>
-                      setDialog({ type: 'dot', dot, spaceId: dot.spaceId })
-                    }
-                  >
-                    Edit specialist <MoreHorizontal size={14} />
-                  </button>
-                  <div className="starter-suggestions">
-                    {STARTERS.map((text) => (
-                      <button
-                        key={text}
-                        disabled={paused || !online}
-                        onClick={() => setPrompt(text)}
-                      >
-                        {text}
-                        <ArrowUpRight size={12} />
-                      </button>
-                    ))}
-                  </div>
                 </div>
               </div>
               <div className="chat-dock">
@@ -455,7 +406,7 @@ export function App() {
                       ? 'All Dots are paused'
                       : online
                         ? `Ask ${dot.name} anything`
-                        : `Waiting for the “${home?.name ?? 'home'}” Space…`
+                        : `Finish ${dot.name}’s setup to start`
                   }
                   disabled={paused || !online || busy}
                   onSubmit={() => void newConversation(prompt)}
@@ -469,7 +420,6 @@ export function App() {
           <ComputerPanel
             key={dot.id}
             dot={dot}
-            onSpace={(id) => openPage(id)}
             openFile={openFile}
             turnsFinished={turnsFinished}
             onClose={() => setComputerOpen(false)}
@@ -481,7 +431,7 @@ export function App() {
             state={state}
             workspace={workspace}
             onClose={() => setDialog(undefined)}
-            onSpaceCreated={(space: StoredSpace) => openPage(space.id)}
+            onDotCreated={(created) => openSetup(created.spaceId)}
             mutate={mutate}
           />
         )}

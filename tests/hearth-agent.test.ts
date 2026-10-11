@@ -136,9 +136,9 @@ it('describes the Dot and names its Spaces', () => {
     review: true,
   });
   expect(prompt).toContain(
-    'You are Scout, a Researcher: an assistant (a "Dot") in Sam\'s Hearth workspace.',
+    'You are Scout: an assistant (a "Dot") in Sam\'s Hearth workspace.',
   );
-  expect(prompt).toContain(`Everyday (id ${dot.spaceId})`);
+  expect(prompt).toContain(`Scout (id ${dot.spaceId})`);
   expect(prompt).toContain('review_space_page');
   expect(
     systemPrompt({
@@ -326,7 +326,7 @@ it('runs in the home Space’s container, and says so when it is not ready', asy
       core: async (spaceId) => {
         asked.push(spaceId);
         throw new SpaceNotReady(
-          '“Everyday” has no container yet. Open the Space and start it.',
+          '“Scout” has no container yet. Start it from its Setup page.',
           'none',
         );
       },
@@ -340,7 +340,7 @@ it('runs in the home Space’s container, and says so when it is not ready', asy
   expect(asked).toEqual([dot.spaceId]);
   expect(events.at(-1)).toMatchObject({
     type: 'RUN_ERROR',
-    message: '“Everyday” has no container yet. Open the Space and start it.',
+    message: '“Scout” has no container yet. Start it from its Setup page.',
   });
   // nothing was sent, so nothing waits in the transcript as delivered
   expect(workspace.transcript('thread-1')).toEqual([]);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Ban, Boxes, Check, FileText, X } from 'lucide-react';
+import { Ban, Check, FileText, X } from 'lucide-react';
 import type {
   ComputerActivity,
   ComputerPermissions,
@@ -11,7 +11,6 @@ import { formatBytes } from '../shared/paths';
 import type { Dot } from '../shared/types';
 import { api } from './api';
 import { FileTreeView } from './FileTreeView';
-import { STAGE_LABEL } from './space-stage';
 type Tab = 'Files' | 'Terminal' | 'Activity';
 const time = (at: number) =>
   new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -36,12 +35,9 @@ export function ComputerPanel({
   dot,
   openFile,
   turnsFinished,
-  onSpace,
   onClose,
 }: {
   dot: Dot;
-  /** Open a Space's page, where its container is set up. */
-  onSpace: (spaceId: string) => void;
   /** A file to show, e.g. one a tool row linked to. */
   openFile?: { path: string; at: number };
   /** Changes whenever a turn ends, so the file list refreshes right away. */
@@ -265,25 +261,6 @@ export function ComputerPanel({
               <p className="computer-empty">No activity yet.</p>
             )}
           </section>
-        )}
-      </div>
-      <div className="computer-note">
-        <p>
-          {dot.name}’s files live in{' '}
-          <code>{status?.directory ?? dot.directory}</code> inside the{' '}
-          {status ? `“${status.space.name}”` : 'home'} Space’s container and
-          persist between conversations.
-        </p>
-        {status && (
-          <button
-            className="container-pill"
-            title={`Open the “${status.space.name}” Space and its setup`}
-            onClick={() => onSpace(status.space.id)}
-          >
-            <Boxes size={13} aria-hidden="true" />
-            {status.space.container ?? status.space.name} ·{' '}
-            {STAGE_LABEL[status.space.stage]}
-          </button>
         )}
       </div>
       <div className="computer-perms">

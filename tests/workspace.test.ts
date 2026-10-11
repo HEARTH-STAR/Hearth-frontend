@@ -1,15 +1,15 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { slug, WorkspaceStore } from '../src/server/workspace.js';
-it('persists spaces, specialists with a role and folder, and canonical thread ownership', () => {
+it('persists spaces, Dots with a folder, and canonical thread ownership', () => {
   const store = new WorkspaceStore(':memory:', 'owner');
   const space = store.createSpace('Design', 'Design decisions');
   const dot = store.createDot({
     spaceId: space.id,
     name: 'Scout Prime!',
-    role: 'Researcher',
     instructions: 'Be concise',
   });
   expect(dot.directory).toBe(`dots/scout-prime-${dot.id.slice(0, 8)}`);
@@ -22,7 +22,6 @@ it('persists spaces, specialists with a role and folder, and canonical thread ow
     spaceId: space.id,
     spaceIds: [space.id],
     name: 'Scout Prime!',
-    role: 'Researcher',
     instructions: 'Be concise',
     directory: dot.directory,
     createdAt: dot.createdAt,
@@ -35,7 +34,6 @@ it('rejects a dot in a nonexistent space and does not rebind an existing thread'
     store.createDot({
       spaceId: 'missing',
       name: 'Dot',
-      role: '',
       instructions: 'Help',
     }),
   ).toThrow();
@@ -81,6 +79,45 @@ it('never restores revoked Space access on restart', () => {
     expect(reopened.canAccessSpace(dot.id, dot.spaceId)).toBe(false);
     expect(reopened.requireThread('existing-thread').dotId).toBe(dot.id);
     expect(reopened.dots()).toHaveLength(1);
+    reopened.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+it('names each Dot’s own Space after the Dot, renaming older ones once', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hearth-names-'));
+  const path = join(dir, 'workspace.sqlite');
+  try {
+    const ws = new WorkspaceStore(path, 'owner');
+    const scout = ws.dots()[0];
+    expect(ws.space(scout.spaceId)).toMatchObject({
+      name: 'Scout',
+      description: '',
+    });
+    const shared = ws.createSpace('Team', 'Shared notes');
+    const first = ws.createDot({
+      spaceId: shared.id,
+      name: 'Ada',
+      instructions: 'Help',
+    });
+    ws.createDot({ spaceId: shared.id, name: 'Lin', instructions: 'Help' });
+    ws.close();
+    // A database from before the rule: the first Space was "Everyday".
+    const legacy = new DatabaseSync(path);
+    legacy
+      .prepare('UPDATE spaces SET name=?, description=? WHERE id=?')
+      .run('Everyday', 'A little space for your day.', scout.spaceId);
+    legacy.close();
+    const reopened = new WorkspaceStore(path, 'owner');
+    expect(reopened.space(scout.spaceId)).toMatchObject({
+      name: 'Scout',
+      description: '',
+    });
+    // a Space two Dots call home is not one Dot's, so it keeps its name
+    expect(reopened.space(shared.id)?.name).toBe('Team');
+    reopened.updateDot(scout.id, { name: 'Scout Prime' });
+    expect(reopened.space(scout.spaceId)?.name).toBe('Scout Prime');
+    expect(reopened.dot(first.id)?.spaceId).toBe(shared.id);
     reopened.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -211,18 +211,10 @@ export function Chat({
       ((typeof message.content === 'string' && message.content.trim()) ||
         (message.role === 'assistant' && message.toolCalls?.length)),
   );
-  const status = paused
-    ? 'paused'
-    : working
-      ? activity || 'working…'
-      : online
-        ? 'computer running'
-        : 'computer offline';
   return (
     <div className="chat">
       <DotHeader
         dot={dot}
-        status={status}
         online={online}
         state={paused ? 'paused' : working ? 'working' : 'idle'}
       >

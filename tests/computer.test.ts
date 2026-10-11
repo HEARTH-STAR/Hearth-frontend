@@ -19,7 +19,7 @@ it('reports the computer, its home Space’s container, its folder and permissio
     permissions: { files: true, shell: false },
     space: {
       id: dot.spaceId,
-      name: 'Everyday',
+      name: 'Scout',
       stage: 'ready',
       container: SPACE_CONTAINER,
     },
@@ -88,7 +88,7 @@ it('says when the home Space’s Hearth-Core is still starting instead of failin
   expect(status.state).toBe('unavailable');
   expect(status.space.stage).toBe('booting');
   expect(status.error).toBe(
-    'Hearth-Core is still starting in “Everyday”’s container.',
+    'Hearth-Core is still starting in “Scout”’s container.',
   );
   const files = await app.request(`/api/dots/${dot.id}/computer/files`);
   expect(files.status).toBe(409);
