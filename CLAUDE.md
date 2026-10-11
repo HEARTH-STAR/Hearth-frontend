@@ -48,6 +48,13 @@
 - Each Dot's computer is its folder in its home Space's container (`dot.directory`, default `dots/<slug>-<id8>`).
   The Files tab (`FileTreeView.tsx`, `@pierre/trees`) and file reads go through this server
   (`/api/dots/:id/computer/*`), never from the browser to Hearth-Core.
+- The Computer panel's Files tab lists the container's whole workspace (`/workspace`); file paths are relative to it,
+  and tool-row links (relative to the Dot's folder) are prefixed with `dot.directory`.
+- Terminal: `TerminalView.tsx` (xterm.js) gets a one-use ticket from `POST /api/dots/:id/computer/terminal`, then
+  opens a WebSocket on the same path. `terminal.ts` handles the upgrade on the Node server (not through Hono): it runs
+  `originProblem` like every /api request, redeems the ticket, and pipes the socket to Hearth-backend's
+  `WS /api/containers/{name}/terminal`. The shell is root in the container and is not under Claude Code's policy: it is
+  the owner's own terminal. Vite's dev proxy forwards WebSockets (`ws: true`).
 - Permissions (`files`, `shell`) are sent with every turn; Hearth-Core enforces them. There is no Memory feature
   (removed at the owner's request); do not bring OpenDots' memories back.
 - Server code reads configuration only through `config.ts` (`configFromEnv`).

@@ -199,7 +199,7 @@ code {
   background: var(--canvas);
 }
 .hearth-app.with-computer {
-  grid-template-columns: 248px minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: 248px minmax(0, 1fr) var(--computer-width, 360px);
 }
 .main {
   min-width: 0;
@@ -929,12 +929,72 @@ code {
 
 /* Computer panel */
 .computer {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--side);
   border-left: 1px solid var(--line);
+  container-type: inline-size;
+}
+.computer.expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  width: auto;
+  border-left: 0;
+  box-shadow: none;
+}
+/* The left edge: drag to resize. */
+.computer-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 5;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.computer-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.computer-resize:hover::after,
+.computer-resize:focus-visible::after,
+body.resizing-computer .computer-resize::after {
+  background: var(--teal);
+}
+.computer-resize:focus-visible {
+  outline: none;
+}
+body.resizing-computer {
+  cursor: col-resize;
+  user-select: none;
+}
+.computer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Wide enough: the file tree and the open file side by side. */
+@container (min-width: 640px) {
+  .computer-files {
+    flex-direction: row;
+  }
+  .files-tree {
+    flex: 0 0 min(320px, 38%);
+  }
+  .file-view {
+    flex: 1 1 auto;
+  }
 }
 .computer-head {
   display: flex;
@@ -1092,36 +1152,50 @@ code {
   color: var(--muted);
   border-top: 1px solid var(--line);
 }
-/* theme: fixed .computer-terminal */
-.computer-terminal {
-  padding: 12px 14px;
+/* theme: fixed .computer-shell */
+/* The terminal: a shell in the Dot's container (xterm.js). */
+.computer-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 4px 6px 12px;
   border-radius: 12px;
   background: #1f2126;
-  color: #d9dbe0;
-  font-family: var(--mono);
+}
+.computer-shell[hidden] {
+  display: none;
+}
+.computer-shell-screen {
+  flex: 1;
+  min-height: 0;
+}
+.computer-shell-screen .xterm-viewport {
+  background: #1f2126 !important;
+}
+.computer-shell-status {
+  position: absolute;
+  inset: auto 12px 12px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: #2b2e35;
+  color: #c9ccd3;
   font-size: 12px;
-  overflow: auto;
 }
-.terminal-command {
+.computer-shell-status button {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-color: #3a3e47;
+  background: #33373f;
   color: #e6e7ea;
-  overflow-wrap: anywhere;
+  font-size: 12px;
 }
-.terminal-command span {
-  color: #7fd1b9;
-}
-.computer-terminal pre {
-  margin: 4px 0 14px;
-  color: #a9adb8;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.terminal-entry.denied .terminal-command,
-.terminal-entry.failed .terminal-command {
-  color: #f2a596;
-}
-.terminal-empty {
-  margin: 0;
-  color: #a9adb8;
+.computer-shell-status button:hover:not(:disabled) {
+  background: #3a3e47;
 }
 /* theme: end */
 .activity-list {
@@ -1715,7 +1789,7 @@ code {
     position: fixed;
     inset: 0 0 0 auto;
     z-index: 40;
-    width: min(380px, 100%);
+    width: min(var(--computer-width, 380px), 100%);
     box-shadow: -12px 0 40px #2f31381f;
   }
 }

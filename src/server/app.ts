@@ -1,3 +1,4 @@
+import { originProblem } from './app-origin.js';
 import { computerRoutes } from './computer-routes.js';
 import { githubRoutes } from './github-routes.js';
 import { spaceRoutes } from './space-routes.js';
@@ -26,37 +27,16 @@ export function createApp({ store, platform, ownerToken, origin }: AppOptions) {
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
     c.header('X-Content-Type-Options', 'nosniff');
-    const requestUrl = new URL(c.req.url);
-    const origins = origin
-      ? Array.isArray(origin)
-        ? origin
-        : [origin]
-      : undefined;
-    const originHostnames = origins
-      ? origins
-          .map((o) => {
-            try {
-              return new URL(o).hostname;
-            } catch {
-              return '';
-            }
-          })
-          .filter(Boolean)
-      : [];
-    const allowedHosts = new Set([
-      'localhost',
-      '127.0.0.1',
-      '[::1]',
-      ...originHostnames,
-    ]);
-    if (!ownerToken && !allowedHosts.has(requestUrl.hostname))
-      return c.json({ error: 'Unrecognized host.' }, 403);
-    const requestOrigin = c.req.header('origin');
-    const allowedOrigins = new Set(origins ?? [new URL(c.req.url).origin]);
-    if (requestOrigin && !allowedOrigins.has(requestOrigin))
-      return c.json({ error: 'Cross-origin requests are not allowed.' }, 403);
-    if (c.req.header('sec-fetch-site') === 'cross-site')
-      return c.json({ error: 'Cross-site requests are not allowed.' }, 403);
+    const refused = originProblem(
+      {
+        url: c.req.url,
+        origin: c.req.header('origin'),
+        secFetchSite: c.req.header('sec-fetch-site'),
+      },
+      origin,
+      ownerToken,
+    );
+    if (refused) return c.json({ error: refused }, 403);
     if (ownerToken) {
       const expected = Buffer.from(ownerToken);
       const supplied = Buffer.from(

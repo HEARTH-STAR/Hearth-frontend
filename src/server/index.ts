@@ -8,6 +8,8 @@ import { resolveAppOrigins } from './app-origin.js';
 import { configFromEnv } from './config.js';
 import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
+import { attachTerminal } from './terminal.js';
+import type { Server } from 'node:http';
 const host = process.env.HOST ?? '127.0.0.1';
 const port = Number(process.env.PORT ?? 4310);
 const config = configFromEnv(process.env);
@@ -29,11 +31,12 @@ const platform = new Platform(store, workspace, config, {
     process.env.THREADS_DATABASE_PATH ??
     join(dirname(database), 'hearth-threads.sqlite'),
 });
+const origin = resolveAppOrigins(process.env.APP_ORIGIN, process.env.NODE_ENV);
 const app = createApp({
   store,
   platform,
   ownerToken: config.ownerToken,
-  origin: resolveAppOrigins(process.env.APP_ORIGIN, process.env.NODE_ENV),
+  origin,
 });
 app.use('*', async (c, next) => {
   c.header('X-Content-Type-Options', 'nosniff');
@@ -51,6 +54,13 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`Hearth listening on http://${host}:${info.port}`);
   console.log(`  Hearth-backend: ${config.backendUrl}`);
   console.log(`  Space template: ${config.containerTemplate}`);
+});
+// The Computer panel's terminal: WebSocket upgrades, checked like /api and piped to Hearth-backend.
+attachTerminal(server as Server, {
+  computers: platform.computers,
+  config,
+  origin,
+  ownerToken: config.ownerToken,
 });
 const shutdown = createShutdown({
   stopPlatform: async () => platform.stop(),

@@ -40,14 +40,14 @@ it('reports the computer, its home Space’s container, its folder and permissio
   ).toBe(400);
   expect((await app.request('/api/dots/missing/computer')).status).toBe(404);
 });
-it('reads files from the Dot folder only, in its home Space’s container', async () => {
+it('lists the container’s whole workspace and reads files by their path in it', async () => {
   const { app, workspace, core, cores } = fixture({
     core: {
       'GET /api/workspace/files': (_request, url) =>
         Response.json({
           directory: url.searchParams.get('directory'),
           exists: true,
-          files: ['notes/acme.md'],
+          files: ['dots/scout/notes/acme.md', 'hearth-core/server.py'],
           truncated: false,
         }),
       'GET /api/workspace/file': (_request, url) =>
@@ -58,9 +58,12 @@ it('reads files from the Dot folder only, in its home Space’s container', asyn
   const listing = await (
     await app.request(`/api/dots/${dot.id}/computer/files`)
   ).json();
-  expect(listing.directory).toBe(dot.directory);
+  expect(listing.directory).toBe('');
+  expect(listing.files).toContain('hearth-core/server.py');
   const file = await (
-    await app.request(`/api/dots/${dot.id}/computer/file?path=notes/acme.md`)
+    await app.request(
+      `/api/dots/${dot.id}/computer/file?path=${dot.directory}/notes/acme.md`,
+    )
   ).json();
   expect(file.path).toBe(`${dot.directory}/notes/acme.md`);
   for (const path of ['../secret', '/etc/passwd', 'a//b', 'a\\b', ''])
