@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveAppOrigins } from '../src/server/app-origin.js';
-import { fixture as base, json } from './helpers.js';
+import { fixture as base, json, SPACE_CONTAINER } from './helpers.js';
 const open: { close(): void }[] = [];
 function fixture(token?: string, origin?: string | string[]) {
   const value = base({ ownerToken: token, origin });
@@ -8,8 +8,9 @@ function fixture(token?: string, origin?: string | string[]) {
   return value;
 }
 afterEach(() => open.splice(0).forEach((value) => value.close()));
-const memory = (origin: string, extra: Record<string, string> = {}) => ({
-  ...json({ text: 'Prefer short briefs' }),
+/** A same-origin JSON write through the /api guards; 200 when they let it through. */
+const write = (origin: string, extra: Record<string, string> = {}) => ({
+  ...json({ paused: false }, 'PATCH'),
   headers: {
     'Content-Type': 'application/json',
     Origin: origin,
@@ -32,14 +33,14 @@ describe('API boundaries', () => {
   it('blocks browser cross-origin requests and form posts', async () => {
     const { app } = fixture();
     expect(
-      (await app.request('/api/memories', memory('https://evil.example')))
+      (await app.request('/api/settings', write('https://evil.example')))
         .status,
     ).toBe(403);
     expect(
       (
-        await app.request('/api/memories', {
-          method: 'POST',
-          body: 'text=hello',
+        await app.request('/api/settings', {
+          method: 'PATCH',
+          body: 'paused=false',
         })
       ).status,
     ).toBe(415);
@@ -52,10 +53,10 @@ describe('API boundaries', () => {
         resolveAppOrigins(undefined, 'development'),
       );
       const response = await app.request(
-        `${origin}/api/memories`,
-        memory(origin),
+        `${origin}/api/settings`,
+        write(origin),
       );
-      expect(response.status).toBe(201);
+      expect(response.status).toBe(200);
     },
   );
   it.each([
@@ -70,8 +71,8 @@ describe('API boundaries', () => {
         resolveAppOrigins(undefined, 'development'),
       );
       const response = await app.request(
-        'http://localhost:5173/api/memories',
-        memory(origin),
+        'http://localhost:5173/api/settings',
+        write(origin),
       );
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({
@@ -85,8 +86,8 @@ describe('API boundaries', () => {
       resolveAppOrigins(undefined, 'development'),
     );
     const response = await app.request(
-      'http://127.0.0.1:4310/api/memories',
-      memory('http://localhost:5173', { 'Sec-Fetch-Site': 'cross-site' }),
+      'http://127.0.0.1:4310/api/settings',
+      write('http://localhost:5173', { 'Sec-Fetch-Site': 'cross-site' }),
     );
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
@@ -96,12 +97,12 @@ describe('API boundaries', () => {
   it('preserves exact matching for a single configured origin', async () => {
     const { app } = fixture(undefined, 'http://localhost:5173');
     for (const [origin, status] of [
-      ['http://localhost:5173', 201],
+      ['http://localhost:5173', 200],
       ['http://127.0.0.1:5173', 403],
     ] as const) {
       const response = await app.request(
-        'http://localhost:5173/api/memories',
-        memory(origin),
+        'http://localhost:5173/api/settings',
+        write(origin),
       );
       expect(response.status).toBe(status);
     }
@@ -116,11 +117,11 @@ describe('API boundaries', () => {
       for (const [authorization, status] of [
         [undefined, 401],
         ['Bearer wrong-token', 401],
-        ['Bearer private-token', 201],
+        ['Bearer private-token', 200],
       ] as const) {
         const response = await app.request(
-          `${origin}/api/memories`,
-          memory(origin, authorization ? { Authorization: authorization } : {}),
+          `${origin}/api/settings`,
+          write(origin, authorization ? { Authorization: authorization } : {}),
         );
         expect(response.status).toBe(status);
       }
@@ -132,8 +133,8 @@ describe('API boundaries', () => {
       resolveAppOrigins(undefined, 'development'),
     );
     const response = await app.request(
-      'http://attacker.example/api/memories',
-      memory('http://localhost:5173'),
+      'http://attacker.example/api/settings',
+      write('http://localhost:5173'),
     );
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'Unrecognized host.' });
@@ -141,8 +142,8 @@ describe('API boundaries', () => {
   it('does not widen access when an explicit origin list contains only blank entries', async () => {
     const { app } = fixture(undefined, resolveAppOrigins(' , ', 'development'));
     const response = await app.request(
-      'http://localhost:5173/api/memories',
-      memory('http://localhost:5173'),
+      'http://localhost:5173/api/settings',
+      write('http://localhost:5173'),
     );
     expect(response.status).toBe(403);
   });
@@ -152,17 +153,17 @@ describe('API boundaries', () => {
       resolveAppOrigins(undefined, 'production'),
     );
     for (const [origin, status] of [
-      ['http://localhost:4310', 201],
+      ['http://localhost:4310', 200],
       ['http://localhost:5173', 403],
     ] as const) {
       const response = await app.request(
-        'http://localhost:4310/api/memories',
-        memory(origin),
+        'http://localhost:4310/api/settings',
+        write(origin),
       );
       expect(response.status).toBe(status);
     }
   });
-  it('validates settings and persists memory edits and deletes', async () => {
+  it('validates and saves settings', async () => {
     const { app, store } = fixture();
     expect(
       (await app.request('/api/settings', json({ paused: 'yes' }, 'PATCH')))
@@ -183,47 +184,72 @@ describe('API boundaries', () => {
     expect(await settings.json()).toEqual({
       name: 'David McKay',
       paused: true,
-      memoryAllowed: true,
     });
-    await app.request('/api/memories', json({ text: 'Prefer short briefs' }));
-    const memory = store.memories()[0];
-    const updated = await app.request(
-      `/api/memories/${memory.id}`,
-      json({ text: 'Prefer deep briefs' }, 'PUT'),
-    );
-    expect(updated.status).toBe(200);
-    expect(store.memories()[0].text).toBe('Prefer deep briefs');
-    await app.request(`/api/memories/${memory.id}`, json({}, 'DELETE'));
-    expect(store.memories()).toHaveLength(0);
+    expect(store.settings()).toEqual({ name: 'David McKay', paused: true });
+    expect(
+      (
+        await app.request(
+          '/api/settings',
+          json({ memoryAllowed: true }, 'PATCH'),
+        )
+      ).status,
+    ).toBe(400);
+    expect(await (await app.request('/api/state')).json()).toEqual({
+      settings: { name: 'David McKay', paused: true },
+    });
+    expect(
+      (await app.request('/api/memories', json({ text: 'x' }))).status,
+    ).toBe(404);
   });
 });
 describe('workspace', () => {
-  it('reports both services and lists Spaces with page counts', async () => {
+  it('reports Hearth-backend and each Space’s container, with page counts', async () => {
     const { app, workspace } = fixture();
     const space = workspace.spaces()[0];
     workspace.pages.create(space.id, { title: 'Brief', content: '' });
     const body = await (await app.request('/api/workspace')).json();
-    expect(body.spaces[0].pageCount).toBe(1);
+    expect(body.spaces[0]).toMatchObject({
+      pageCount: 1,
+      container: SPACE_CONTAINER,
+      stage: 'ready',
+      claude: true,
+    });
     expect(body.dots[0]).toMatchObject({ name: 'Scout', role: 'Researcher' });
     expect(body.dots[0].directory).toMatch(/^dots\/scout-[0-9a-f]{8}$/);
-    expect(body.setup.core).toMatchObject({
-      reachable: true,
-      detail: 'agent claude_code',
-    });
     expect(body.setup.backend).toMatchObject({
       reachable: true,
       detail: 'Docker 29.6.2',
+      docker: true,
     });
     expect(body.setup.missing).toEqual([]);
   });
-  it('names Hearth-Core as missing when it does not answer', async () => {
-    const value = base({
+  it('names Docker or Hearth-backend as missing, and a Space still starting', async () => {
+    const starting = base({
       core: { 'GET /health': () => Response.json({}, { status: 503 }) },
+      backend: {
+        'GET /api/status/docker': () => Response.json({ reachable: false }),
+      },
     });
-    open.push(value);
-    const body = await (await value.app.request('/api/workspace')).json();
-    expect(body.setup.core.reachable).toBe(false);
-    expect(body.setup.missing).toEqual(['Hearth-Core at http://core.test']);
+    open.push(starting);
+    const body = await (await starting.app.request('/api/workspace')).json();
+    expect(body.spaces[0]).toMatchObject({ stage: 'booting', claude: null });
+    expect(body.setup.missing).toEqual(['Docker']);
+    const down = base({
+      backend: {
+        'GET /api/status/docker': () => {
+          throw new TypeError('fetch failed');
+        },
+        [`GET /api/containers/${SPACE_CONTAINER}`]: () => {
+          throw new TypeError('fetch failed');
+        },
+      },
+    });
+    open.push(down);
+    const offline = await (await down.app.request('/api/workspace')).json();
+    expect(offline.spaces[0].stage).toBe('unknown');
+    expect(offline.setup.missing).toEqual([
+      'Hearth-backend at http://backend.test',
+    ]);
   });
   it('creates and edits Dots with a role and a safe working folder', async () => {
     const { app, workspace } = fixture();
@@ -233,7 +259,6 @@ describe('workspace', () => {
       name: 'Quill',
       role: 'Writer',
       instructions: 'Write the launch brief.',
-      memoryAllowed: false,
     };
     const created = await (await app.request('/api/dots', json(dot))).json();
     expect(created.directory).toMatch(/^dots\/quill-/);
@@ -265,8 +290,8 @@ describe('workspace', () => {
 it('rejects DNS-rebinding Host even with a matching hostile Origin', async () => {
   const { app } = fixture();
   const response = await app.request(
-    'http://attacker.example/api/memories',
-    memory('http://attacker.example'),
+    'http://attacker.example/api/settings',
+    write('http://attacker.example'),
   );
   expect(response.status).toBe(403);
 });

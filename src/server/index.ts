@@ -49,8 +49,8 @@ app.use('/*', serveStatic({ root: './dist/client' }));
 app.get('*', serveStatic({ path: './dist/client/index.html' }));
 const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`Hearth listening on http://${host}:${info.port}`);
-  console.log(`  Hearth-Core:    ${config.coreUrl}`);
   console.log(`  Hearth-backend: ${config.backendUrl}`);
+  console.log(`  Space template: ${config.containerTemplate}`);
 });
 const shutdown = createShutdown({
   stopPlatform: async () => platform.stop(),

@@ -40,7 +40,7 @@ it('turns Hearth-Core failures into readable errors', async () => {
     throw new TypeError('fetch failed');
   }) as typeof fetch);
   await expect(offline.health()).rejects.toThrow(
-    'Hearth-Core is not reachable at http://core.test. Start it, or set HEARTH_CORE_URL.',
+    'Hearth-Core is not reachable at http://core.test.',
   );
   const { fetch, calls } = fakeFetch({
     'GET /api/workspace/file': () =>
@@ -91,20 +91,21 @@ it('sends the backend token and keeps the backend detail', async () => {
 });
 it('reads its service addresses from the environment', () => {
   expect(configFromEnv({})).toMatchObject({
-    coreUrl: 'http://127.0.0.1:5010',
     backendUrl: 'http://127.0.0.1:5020',
+    containerTemplate: 'space',
+    spaceHost: '127.0.0.1',
   });
   expect(
     configFromEnv({
-      HEARTH_CORE_URL: ' http://space:5010/ ',
       HEARTH_BACKEND_URL: 'http://host:5020//',
       HEARTH_BACKEND_TOKEN: ' ',
-      HEARTH_CONTAINER_TEMPLATE: 'ubuntu-26.04',
+      HEARTH_CONTAINER_TEMPLATE: 'my-space',
+      HEARTH_SPACE_HOST: ' host.docker.internal ',
     }),
   ).toMatchObject({
-    coreUrl: 'http://space:5010',
     backendUrl: 'http://host:5020',
     backendToken: undefined,
-    containerTemplate: 'ubuntu-26.04',
+    containerTemplate: 'my-space',
+    spaceHost: 'host.docker.internal',
   });
 });

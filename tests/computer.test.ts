@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { fixture as base, json } from './helpers.js';
+import { fixture as base, json, SPACE_CONTAINER } from './helpers.js';
 const open: { close(): void }[] = [];
 afterEach(() => open.splice(0).forEach((item) => item.close()));
 function fixture(options: Parameters<typeof base>[0] = {}) {
@@ -7,17 +7,22 @@ function fixture(options: Parameters<typeof base>[0] = {}) {
   open.push(value);
   return value;
 }
-it('reports the computer, its folder and permissions, and saves permission changes', async () => {
+it('reports the computer, its home Space’s container, its folder and permissions, and saves permission changes', async () => {
   const { app, workspace } = fixture();
   const dot = workspace.dots()[0];
   const status = await (
     await app.request(`/api/dots/${dot.id}/computer`)
   ).json();
-  expect(status).toMatchObject({
+  expect(status).toEqual({
     state: 'running',
     directory: dot.directory,
     permissions: { files: true, shell: false },
-    container: null,
+    space: {
+      id: dot.spaceId,
+      name: 'Everyday',
+      stage: 'ready',
+      container: SPACE_CONTAINER,
+    },
     activity: [],
   });
   const patched = await app.request(
@@ -35,8 +40,8 @@ it('reports the computer, its folder and permissions, and saves permission chang
   ).toBe(400);
   expect((await app.request('/api/dots/missing/computer')).status).toBe(404);
 });
-it('reads files from the Dot folder only', async () => {
-  const { app, workspace, core } = fixture({
+it('reads files from the Dot folder only, in its home Space’s container', async () => {
+  const { app, workspace, core, cores } = fixture({
     core: {
       'GET /api/workspace/files': (_request, url) =>
         Response.json({
@@ -69,66 +74,24 @@ it('reads files from the Dot folder only', async () => {
   expect(
     core.calls.filter((call) => call.path === '/api/workspace/file'),
   ).toHaveLength(1);
+  // the port Docker published for the container's Hearth-Core
+  expect(new Set(cores)).toEqual(new Set(['http://127.0.0.1:49153']));
 });
-it('says when Hearth-Core is offline instead of failing', async () => {
-  const { app, workspace } = fixture({
-    core: {
-      'GET /health': () => Response.json({}, { status: 500 }),
-      'GET /api/workspace/files': () => {
-        throw new TypeError('fetch failed');
-      },
-    },
+it('says when the home Space’s Hearth-Core is still starting instead of failing', async () => {
+  const { app, workspace, core } = fixture({
+    core: { 'GET /health': () => Response.json({}, { status: 500 }) },
   });
   const dot = workspace.dots()[0];
   const status = await (
     await app.request(`/api/dots/${dot.id}/computer`)
   ).json();
   expect(status.state).toBe('unavailable');
-  expect(status.error).toBe('Hearth-Core returned HTTP 500.');
-  expect((await app.request(`/api/dots/${dot.id}/computer/files`)).status).toBe(
-    502,
+  expect(status.space.stage).toBe('booting');
+  expect(status.error).toBe(
+    'Hearth-Core is still starting in “Everyday”’s container.',
   );
-});
-it('spins up a container through Hearth-backend and records an existing one', async () => {
-  let taken = false;
-  const { app, workspace, backend } = fixture({
-    backend: {
-      'POST /api/containers': () =>
-        taken
-          ? Response.json({ detail: 'name taken' }, { status: 409 })
-          : Response.json(
-              {
-                id: 'abc',
-                short_id: 'abc123',
-                name: 'hearth-container-scout-1',
-                template: 'ubuntu-26.04',
-                image: 'hearth/container:ubuntu-26.04',
-                status: 'running',
-              },
-              { status: 201 },
-            ),
-    },
-  });
-  const dot = workspace.dots()[0];
-  const created = await app.request(
-    `/api/dots/${dot.id}/computer/container`,
-    json({}),
-  );
-  expect(created.status).toBe(201);
-  expect(await created.json()).toMatchObject({
-    name: 'hearth-container-scout-1',
-    shortId: 'abc123',
-    status: 'running',
-  });
-  expect(backend.calls.at(-1)?.body).toEqual({
-    name: `scout-${dot.id.slice(0, 8)}`,
-  });
-  taken = true;
-  const again = await (
-    await app.request(`/api/dots/${dot.id}/computer/container`, json({}))
-  ).json();
-  expect(again).toMatchObject({
-    name: 'hearth-container-scout-1',
-    status: 'exists',
-  });
+  const files = await app.request(`/api/dots/${dot.id}/computer/files`);
+  expect(files.status).toBe(409);
+  expect(await files.json()).toMatchObject({ stage: 'booting' });
+  expect(core.calls.every((call) => call.path === '/health')).toBe(true);
 });

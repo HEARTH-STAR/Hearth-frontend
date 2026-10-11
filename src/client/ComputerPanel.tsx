@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Ban, Boxes, Check, FileText, RefreshCw, X } from 'lucide-react';
+import { Ban, Boxes, Check, FileText, X } from 'lucide-react';
 import type {
   ComputerActivity,
   ComputerPermissions,
@@ -11,6 +11,7 @@ import { formatBytes } from '../shared/paths';
 import type { Dot } from '../shared/types';
 import { api } from './api';
 import { FileTreeView } from './FileTreeView';
+import { STAGE_LABEL } from './space-stage';
 type Tab = 'Files' | 'Terminal' | 'Activity';
 const time = (at: number) =>
   new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -35,15 +36,16 @@ export function ComputerPanel({
   dot,
   openFile,
   turnsFinished,
-  onToggleMemory,
+  onSpace,
   onClose,
 }: {
   dot: Dot;
+  /** Open a Space's page, where its container is set up. */
+  onSpace: (spaceId: string) => void;
   /** A file to show, e.g. one a tool row linked to. */
   openFile?: { path: string; at: number };
   /** Changes whenever a turn ends, so the file list refreshes right away. */
   turnsFinished: number;
-  onToggleMemory: (allowed: boolean) => Promise<void>;
   onClose: () => void;
 }) {
   const base = `/dots/${encodeURIComponent(dot.id)}/computer`;
@@ -114,20 +116,6 @@ export function ComputerPanel({
       await loadStatus();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not save.');
-    } finally {
-      setBusy('');
-    }
-  };
-  const spinUp = async () => {
-    setBusy('container');
-    setError('');
-    try {
-      await api(`${base}/container`, 'POST', {});
-      await loadStatus();
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : 'The container did not start.',
-      );
     } finally {
       setBusy('');
     }
@@ -282,29 +270,19 @@ export function ComputerPanel({
       <div className="computer-note">
         <p>
           {dot.name}’s files live in{' '}
-          <code>{status?.directory ?? dot.directory}</code> on Hearth-Core and
+          <code>{status?.directory ?? dot.directory}</code> inside the{' '}
+          {status ? `“${status.space.name}”` : 'home'} Space’s container and
           persist between conversations.
         </p>
-        {status?.container ? (
-          <span className="container-pill" title={status.container.image ?? ''}>
-            <Boxes size={13} aria-hidden="true" /> {status.container.name} ·{' '}
-            {status.container.status}
-          </span>
-        ) : (
+        {status && (
           <button
-            disabled={!!busy}
-            onClick={() => void spinUp()}
-            title="Spin up a container for this Dot through Hearth-backend. The first one builds the image, which can take a few minutes."
+            className="container-pill"
+            title={`Open the “${status.space.name}” Space and its setup`}
+            onClick={() => onSpace(status.space.id)}
           >
-            {busy === 'container' ? (
-              <>
-                <RefreshCw size={13} className="spinning" /> Spinning up…
-              </>
-            ) : (
-              <>
-                <Boxes size={13} /> Spin up container
-              </>
-            )}
+            <Boxes size={13} aria-hidden="true" />
+            {status.space.container ?? status.space.name} ·{' '}
+            {STAGE_LABEL[status.space.stage]}
           </button>
         )}
       </div>
@@ -327,22 +305,6 @@ export function ComputerPanel({
               {key === 'files' ? 'Files' : 'Shell'}
             </button>
           ))}
-          <button
-            className="chip"
-            aria-pressed={dot.memoryAllowed}
-            disabled={!!busy}
-            title="Include your saved memories in its turns"
-            onClick={async () => {
-              setBusy('memory');
-              try {
-                await onToggleMemory(!dot.memoryAllowed);
-              } finally {
-                setBusy('');
-              }
-            }}
-          >
-            Memory
-          </button>
         </div>
       </div>
     </aside>

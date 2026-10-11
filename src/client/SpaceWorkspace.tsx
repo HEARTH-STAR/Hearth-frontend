@@ -4,6 +4,7 @@ import type { Page } from '../server/pages';
 import type { Space, WorkspaceState } from '../shared/types';
 import { api } from './api';
 import { SpaceLibrary } from './SpaceLibrary';
+import { SpaceSetup } from './SpaceSetup';
 import { PageDocument } from './PageDocument';
 import { PageOutline } from './PageOutline';
 export function SpaceWorkspace({
@@ -15,7 +16,6 @@ export function SpaceWorkspace({
   onDirty,
   onRefresh,
   onThread,
-  onSettings,
   onCreateDot,
 }: {
   space: Space;
@@ -26,7 +26,6 @@ export function SpaceWorkspace({
   onDirty: (value: boolean) => void;
   onRefresh: () => void;
   onThread: (threadId: string) => void;
-  onSettings: () => void;
   onCreateDot: () => void;
 }) {
   const [pages, setPages] = useState<Page[]>([]);
@@ -105,6 +104,7 @@ export function SpaceWorkspace({
         <SpaceLibrary
           space={space}
           pages={pages}
+          setup={<SpaceSetup space={space} onChanged={onRefresh} />}
           onPage={onPage}
           onNew={() => void create(null)}
         />
@@ -136,7 +136,6 @@ export function SpaceWorkspace({
             onDeleted={deleted}
             onRefresh={onRefresh}
             onThread={onThread}
-            onSettings={onSettings}
             onCreateDot={onCreateDot}
           />
         </div>

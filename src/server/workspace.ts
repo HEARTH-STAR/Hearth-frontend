@@ -4,11 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Conversation, Dot, Space } from '../shared/types.js';
-export type DotInput = Pick<
-  Dot,
-  'name' | 'role' | 'instructions' | 'memoryAllowed'
-> & {
+import type { Conversation, Dot, StoredSpace } from '../shared/types.js';
+export type DotInput = Pick<Dot, 'name' | 'role' | 'instructions'> & {
   spaceId: string;
   spaceIds?: string[];
   directory?: string;
@@ -43,6 +40,7 @@ export class WorkspaceStore {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS spaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS space_containers(spaceId TEXT PRIMARY KEY, name TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS dots(id TEXT PRIMARY KEY, spaceId TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, instructions TEXT NOT NULL, directory TEXT NOT NULL, memoryAllowed INTEGER NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS dot_spaces(dotId TEXT NOT NULL, spaceId TEXT NOT NULL, PRIMARY KEY(dotId, spaceId));
       CREATE TABLE IF NOT EXISTS thread_bindings(id TEXT PRIMARY KEY, dotId TEXT NOT NULL, ownerId TEXT NOT NULL, title TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, preview TEXT NOT NULL DEFAULT '');
@@ -64,40 +62,55 @@ export class WorkspaceStore {
         role: 'Researcher',
         instructions:
           'Be thoughtful, practical, and concise. Read what is in your folder before answering, keep notes as Markdown files, and show drafts for review before saving them to a Space.',
-        memoryAllowed: true,
       });
     }
   }
   close() {
     this.db.close();
   }
-  spaces(): Space[] {
+  spaces(): StoredSpace[] {
     return this.db
       .prepare(
-        'SELECT spaces.*, (SELECT COUNT(*) FROM pages WHERE pages.spaceId=spaces.id) AS pageCount FROM spaces ORDER BY createdAt',
+        'SELECT spaces.*, (SELECT COUNT(*) FROM pages WHERE pages.spaceId=spaces.id) AS pageCount, space_containers.name AS container FROM spaces LEFT JOIN space_containers ON space_containers.spaceId=spaces.id ORDER BY spaces.createdAt',
       )
       .all()
       .map((row) => ({
         ...row,
         pageCount: Number(row.pageCount),
-      })) as unknown as Space[];
+        container: row.container === null ? null : String(row.container),
+      })) as unknown as StoredSpace[];
   }
-  createSpace(name: string, description: string): Space {
+  space(id: string) {
+    return this.spaces().find((space) => space.id === id);
+  }
+  createSpace(name: string, description: string): StoredSpace {
     const space = {
       id: randomUUID(),
       name,
       description,
       createdAt: Date.now(),
       pageCount: 0,
+      container: null,
     };
     this.db
       .prepare('INSERT INTO spaces VALUES (?, ?, ?, ?)')
       .run(space.id, name, description, space.createdAt);
     return space;
   }
+  /** Records the Docker name of the Space's container. */
+  setSpaceContainer(spaceId: string, name: string) {
+    this.db
+      .prepare(
+        'INSERT INTO space_containers VALUES (?, ?, ?) ON CONFLICT(spaceId) DO UPDATE SET name=excluded.name',
+      )
+      .run(spaceId, name, Date.now());
+  }
   dots(): Dot[] {
+    // memoryAllowed is a leftover column: older databases have it, nothing reads it.
     return this.db
-      .prepare('SELECT * FROM dots ORDER BY createdAt')
+      .prepare(
+        'SELECT id, spaceId, name, role, instructions, directory, createdAt FROM dots ORDER BY createdAt',
+      )
       .all()
       .map((row) => ({
         ...row,
@@ -107,7 +120,6 @@ export class WorkspaceStore {
           )
           .all(String(row.id))
           .map((grant) => String(grant.spaceId)),
-        memoryAllowed: !!row.memoryAllowed,
       })) as unknown as Dot[];
   }
   dot(id: string) {
@@ -126,7 +138,6 @@ export class WorkspaceStore {
       instructions: input.instructions,
       directory:
         input.directory ?? `dots/${slug(input.name)}-${id.slice(0, 8)}`,
-      memoryAllowed: input.memoryAllowed,
       createdAt: Date.now(),
     };
     this.transaction(() => {
@@ -139,7 +150,7 @@ export class WorkspaceStore {
           dot.role,
           dot.instructions,
           dot.directory,
-          +dot.memoryAllowed,
+          0,
           dot.createdAt,
         );
       for (const space of dot.spaceIds)
@@ -161,7 +172,7 @@ export class WorkspaceStore {
     this.transaction(() => {
       this.db
         .prepare(
-          'UPDATE dots SET spaceId=?, name=?, role=?, instructions=?, directory=?, memoryAllowed=? WHERE id=?',
+          'UPDATE dots SET spaceId=?, name=?, role=?, instructions=?, directory=? WHERE id=?',
         )
         .run(
           next.spaceId,
@@ -169,7 +180,6 @@ export class WorkspaceStore {
           next.role,
           next.instructions,
           next.directory,
-          +next.memoryAllowed,
           id,
         );
       this.db.prepare('DELETE FROM dot_spaces WHERE dotId=?').run(id);

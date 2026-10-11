@@ -11,7 +11,6 @@ export function PageConversation({
   paused,
   beforeChat,
   onRefresh,
-  onSettings,
   onCreateDot,
   onOpenChange,
 }: {
@@ -20,7 +19,6 @@ export function PageConversation({
   paused: boolean;
   beforeChat: () => Promise<boolean>;
   onRefresh: () => void;
-  onSettings: () => void;
   onCreateDot: () => void;
   onOpenChange: (value: boolean) => void;
 }) {
@@ -29,6 +27,9 @@ export function PageConversation({
   );
   const [dotId, setDotId] = useState('');
   const dot = dots.find((dot) => dot.id === dotId) ?? dots[0];
+  // The Dot runs in its home Space's container, with the Claude Code signed in there.
+  const home = workspace.spaces.find((space) => space.id === dot?.spaceId);
+  const online = home?.stage === 'ready' && home.claude !== false;
   const [thread, setThread] = useState<Conversation>();
   const [draft, setDraft] = useState('');
   const [pending, setPending] = useState<string>();
@@ -104,7 +105,7 @@ export function PageConversation({
           thread={thread}
           dot={dot}
           spaces={workspace.spaces}
-          online={workspace.setup.core.reachable}
+          online={online}
           initialPrompt={pending}
           onConsumed={() => setPending(undefined)}
           paused={paused}
@@ -119,11 +120,16 @@ export function PageConversation({
         <button onClick={onCreateDot}>Create specialist</button>
       </div>
     );
-  if (workspace.setup.missing.length)
+  if (!online)
     return (
       <div className="document-chat-setup">
-        <span>Start Hearth-Core to chat about this page.</span>
-        <button onClick={onSettings}>Setup details</button>
+        <span>
+          {dot.name} runs in the “{home?.name ?? 'home'}” Space, which is not
+          set up yet.
+        </span>
+        <a className="button" href={`#/spaces/${dot.spaceId}`}>
+          Set up {home?.name ?? 'the Space'}
+        </a>
       </div>
     );
   return (

@@ -207,7 +207,6 @@ it('answers malformed JSON and invalid Space access with 400 on workspace routes
     name: dot.name,
     role: dot.role,
     instructions: dot.instructions,
-    memoryAllowed: true,
     spaceId: dot.spaceId,
   };
   expect(

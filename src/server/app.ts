@@ -1,4 +1,6 @@
 import { computerRoutes } from './computer-routes.js';
+import { githubRoutes } from './github-routes.js';
+import { spaceRoutes } from './space-routes.js';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { timingSafeEqual } from 'node:crypto';
@@ -77,50 +79,21 @@ export function createApp({ store, platform, ownerToken, origin }: AppOptions) {
     await next();
   });
   app.route('/api', computerRoutes(platform.computers));
+  app.route('/api', spaceRoutes(platform.spaces));
+  app.route('/api', githubRoutes(platform.spaces));
   app.route('/api', workspaceRoutes(platform));
-  app.get('/api/state', (c) =>
-    c.json({ settings: store.settings(), memories: store.memories() }),
-  );
+  app.get('/api/state', (c) => c.json({ settings: store.settings() }));
   app.patch('/api/settings', async (c) => {
     const parsed = z
       .object({
         name: z.string().trim().min(1).max(40).optional(),
         paused: z.boolean().optional(),
-        memoryAllowed: z.boolean().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'Invalid settings.' }, 400);
     return c.json(store.updateSettings(parsed.data));
   });
-  const memoryText = z
-    .object({ text: z.string().trim().min(1).max(2000) })
-    .strict();
-  app.post('/api/memories', async (c) => {
-    const parsed = memoryText.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success)
-      return c.json(
-        { error: 'Memory must be between 1 and 2,000 characters.' },
-        400,
-      );
-    return c.json(store.saveMemory(parsed.data.text), 201);
-  });
-  app.put('/api/memories/:id', async (c) => {
-    const parsed = memoryText.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success)
-      return c.json(
-        { error: 'Memory must be between 1 and 2,000 characters.' },
-        400,
-      );
-    if (!store.memories().some((m) => m.id === c.req.param('id')))
-      return c.json({ error: 'Memory not found.' }, 404);
-    return c.json(store.saveMemory(parsed.data.text, c.req.param('id')));
-  });
-  app.delete('/api/memories/:id', (c) =>
-    store.deleteMemory(c.req.param('id'))
-      ? c.json({ ok: true })
-      : c.json({ error: 'Memory not found.' }, 404),
-  );
   app.onError((error, c) => {
     console.error('API request failed:', error.name);
     return c.json(

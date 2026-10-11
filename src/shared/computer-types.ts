@@ -1,6 +1,7 @@
 import { z } from 'zod';
-// A Dot's computer is its folder in the Hearth-Core workspace, where Claude Code works, plus an
-// optional container spun up through Hearth-backend.
+import type { SpaceStage } from './types.js';
+// A Dot's computer is its folder in its home Space's container, where that Space's Hearth-Core
+// runs Claude Code.
 export const computerPermissionsSchema = z
   .object({
     files: z.boolean(),
@@ -24,20 +25,18 @@ export interface ComputerActivity {
   outcome: 'pending' | 'succeeded' | 'failed' | 'denied';
   createdAt: number;
 }
-export interface ContainerRecord {
-  name: string;
-  shortId: string | null;
-  template: string | null;
-  image: string | null;
-  status: string;
-  createdAt: number;
-}
 export interface ComputerStatus {
-  /** Running when Hearth-Core answers. */
+  /** Running when Hearth-Core in the home Space's container answers. */
   state: 'running' | 'unavailable';
   directory: string;
   permissions: ComputerPermissions;
-  container: ContainerRecord | null;
+  /** The Dot's home Space, whose container this computer is. */
+  space: {
+    id: string;
+    name: string;
+    stage: SpaceStage;
+    container: string | null;
+  };
   activity: ComputerActivity[];
   error?: string;
 }

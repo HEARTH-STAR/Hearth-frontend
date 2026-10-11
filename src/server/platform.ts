@@ -16,6 +16,7 @@ import { HearthCore } from './hearth-core.js';
 import { PageService } from './page-service.js';
 import { validateRuntimeScope } from './runtime-scope.js';
 import { ServiceMonitor } from './service-status.js';
+import { SpaceService } from './space-service.js';
 import { Store } from './store.js';
 import { WorkspaceStore } from './workspace.js';
 /**
@@ -43,17 +44,19 @@ export function clearInterruptedRuns(path: string) {
 export interface PlatformOptions {
   /** SQLite file for conversation history (AG-UI run events); ``:memory:`` in tests. */
   threadsDatabase: string;
-  core?: HearthCore;
   backend?: HearthBackend;
+  /** The client for the Hearth-Core a Space's container serves at ``url`` (faked in tests). */
+  coreAt?: (url: string) => HearthCore;
 }
 /**
  * Everything behind ``/api``: the CopilotKit runtime (SSE mode, no Intelligence) whose agents are
- * one HearthAgent per Dot, Hearth-Core and Hearth-backend clients, and the computer and page services.
+ * one HearthAgent per Dot, the Hearth-backend client, the Spaces (one container each, with its own
+ * Hearth-Core), and the computer and page services.
  */
 export class Platform {
-  readonly core: HearthCore;
   readonly backend: HearthBackend;
   readonly monitor: ServiceMonitor;
+  readonly spaces: SpaceService;
   readonly computers: ComputerService;
   readonly pages: PageService;
   readonly handler: CopilotHonoApp;
@@ -64,22 +67,27 @@ export class Platform {
     readonly config: HearthConfig,
     options: PlatformOptions,
   ) {
-    this.core = options.core ?? new HearthCore(config.coreUrl);
     this.backend =
       options.backend ??
       new HearthBackend(config.backendUrl, config.backendToken);
-    this.monitor = new ServiceMonitor(this.core, this.backend);
-    this.computers = new ComputerService(
+    this.monitor = new ServiceMonitor(this.backend);
+    this.spaces = new SpaceService(
       workspace,
-      this.core,
       this.backend,
-      this.monitor,
       config,
+      options.coreAt,
     );
+    this.computers = new ComputerService(workspace, this.spaces);
     this.pages = new PageService(workspace);
     clearInterruptedRuns(options.threadsDatabase);
     this.runner = new SqliteAgentRunner({ dbPath: options.threadsDatabase });
-    const deps = { store, workspace, core: this.core, config };
+    // Each Dot runs in its home Space's container.
+    const deps = {
+      store,
+      workspace,
+      core: (spaceId: string) => this.spaces.core(spaceId),
+      config,
+    };
     const runtime = new CopilotRuntime({
       runner: this.runner,
       agents: () =>

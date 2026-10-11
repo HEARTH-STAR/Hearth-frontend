@@ -39,7 +39,14 @@ export function pageAccess(
       check();
       return workspace
         .spaces()
-        .filter((space) => workspace.canAccessSpace(dotId, space.id));
+        .filter((space) => workspace.canAccessSpace(dotId, space.id))
+        .map(({ id, name, description, createdAt, pageCount }) => ({
+          id,
+          name,
+          description,
+          createdAt,
+          pageCount,
+        }));
     },
     list: (requested?: string) =>
       workspace.pages

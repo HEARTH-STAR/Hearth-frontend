@@ -3,7 +3,13 @@ import { SpaceWorkspace } from './SpaceWorkspace';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
 import { ArrowUpRight, Menu, Monitor, MoreHorizontal, X } from 'lucide-react';
-import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
+import type {
+  Conversation,
+  Dot,
+  State,
+  StoredSpace,
+  WorkspaceState,
+} from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
 import {
   applyRefreshResult,
@@ -16,9 +22,9 @@ import { Chat, Composer } from './Chat';
 import { ComputerPanel } from './ComputerPanel';
 import { ConversationMenu } from './ConversationMenu';
 import { DotHeader } from './DotHeader';
-import { MemoryView } from './MemoryView';
 import { latestConversation, Sidebar } from './Sidebar';
-import { dotPayload, WorkspaceDialog, type Dialog } from './WorkspaceDialog';
+import { STAGE_PHRASE } from './space-stage';
+import { WorkspaceDialog, type Dialog } from './WorkspaceDialog';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -37,7 +43,7 @@ export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>();
   const [selectedDot, setSelectedDot] = useState('');
   const [selectedThread, setSelectedThread] = useState<string>();
-  const [view, rawSetView] = useState<'chat' | 'memory' | 'space'>('chat');
+  const [view, rawSetView] = useState<'chat' | 'space'>('chat');
   const dirtyPage = useRef(false);
   const [spaceId, setSpaceId] = useState('');
   const [pageId, setPageId] = useState<string>();
@@ -140,12 +146,13 @@ export function App() {
     const timer = setInterval(() => void refresh(), 3000);
     return () => clearInterval(timer);
   }, [refresh]);
+  /** The saved value, or false when the request failed (its error shows in the banner). */
   const mutate = async (path: string, method: string, body?: unknown) => {
     setError('');
     try {
-      await api(path, method, body);
+      const saved = await api<unknown>(path, method, body);
       await refresh();
-      return true;
+      return saved ?? true;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save.');
       return false;
@@ -162,7 +169,9 @@ export function App() {
   const thread = workspace?.conversations.find(
     (item) => item.id === selectedThread && item.dotId === dot?.id,
   );
-  const online = !!workspace?.setup.core.reachable;
+  // A Dot runs in its home Space's container, with the Claude Code signed in there.
+  const home = workspace?.spaces.find((space) => space.id === dot?.spaceId);
+  const online = home?.stage === 'ready' && home.claude !== false;
   const chooseDot = (next: Dot) => {
     if (!setView('chat')) return;
     setSelectedDot(next.id);
@@ -271,7 +280,12 @@ export function App() {
   );
   const showComputer = view === 'chat' && computerOpen;
   return (
-    <CopilotKitProvider runtimeUrl="/api/copilotkit" headers={authHeaders()}>
+    <CopilotKitProvider
+      runtimeUrl="/api/copilotkit"
+      headers={authHeaders()}
+      // CopilotKit's dev Inspector advertises cloud features Hearth does not use; opt in to debug.
+      enableInspector={import.meta.env.VITE_COPILOTKIT_INSPECTOR === 'true'}
+    >
       <div className={`hearth-app ${showComputer ? 'with-computer' : ''}`}>
         <button
           className="mobile-menu icon-button"
@@ -291,12 +305,10 @@ export function App() {
         )}
         <Sidebar
           workspace={workspace}
-          settings={state.settings}
           open={mobile}
           search={search}
           activeDot={view === 'chat' ? dot.id : undefined}
           activeSpace={view === 'space' ? spaceId : undefined}
-          memoryActive={view === 'memory'}
           onSearch={setSearch}
           onNew={() => void newConversation()}
           onDot={chooseDot}
@@ -308,9 +320,6 @@ export function App() {
           }
           onSpace={(id) => openPage(id)}
           onCreateSpace={() => setDialog({ type: 'space' })}
-          onMemory={() => {
-            if (setView('memory')) setMobile(false);
-          }}
           onSettings={() => setDialog({ type: 'settings' })}
         />
         <div className="main">
@@ -331,12 +340,15 @@ export function App() {
               All Dots are paused. Resume them in Settings.
             </div>
           )}
-          {!online && view === 'chat' && (
+          {!online && view === 'chat' && home && (
             <div className="notice">
-              Hearth-Core is not answering at{' '}
-              <code>{workspace.setup.core.url}</code>, so Dots cannot run. Start
-              it with <code>./hearth-core.sh dev</code>, or set{' '}
-              <code>HEARTH_CORE_URL</code>.
+              {dot.name} runs in the “{home.name}” Space,{' '}
+              {home.stage === 'ready'
+                ? 'where Claude Code is not signed in yet.'
+                : `whose container is ${STAGE_PHRASE[home.stage]}.`}{' '}
+              <button className="text-button" onClick={() => openPage(home.id)}>
+                Set up {home.name}
+              </button>
             </div>
           )}
           {view === 'space' ? (
@@ -350,7 +362,6 @@ export function App() {
               workspace={workspace}
               paused={paused}
               onPage={(id) => openPage(spaceId, id)}
-              onSettings={() => setDialog({ type: 'settings' })}
               onCreateDot={() => setDialog({ type: 'dot', spaceId })}
               onDirty={setDirtyPage}
               onRefresh={refresh}
@@ -361,16 +372,6 @@ export function App() {
                   setSelectedThread(id);
                 }
               }}
-            />
-          ) : view === 'memory' ? (
-            <MemoryView
-              memories={state.memories}
-              settings={state.settings}
-              onAdd={() => setDialog({ type: 'memory' })}
-              onEdit={(memory) => setDialog({ type: 'memory', memory })}
-              onDelete={(memory) =>
-                void mutate(`/memories/${memory.id}`, 'DELETE', {})
-              }
             />
           ) : thread ? (
             <Chat
@@ -400,7 +401,7 @@ export function App() {
                     ? 'paused'
                     : online
                       ? 'computer running'
-                      : 'computer offline'
+                      : 'needs setup'
                 }
               >
                 {conversationMenu}
@@ -454,7 +455,7 @@ export function App() {
                       ? 'All Dots are paused'
                       : online
                         ? `Ask ${dot.name} anything`
-                        : 'Waiting for Hearth-Core…'
+                        : `Waiting for the “${home?.name ?? 'home'}” Space…`
                   }
                   disabled={paused || !online || busy}
                   onSubmit={() => void newConversation(prompt)}
@@ -468,15 +469,9 @@ export function App() {
           <ComputerPanel
             key={dot.id}
             dot={dot}
+            onSpace={(id) => openPage(id)}
             openFile={openFile}
             turnsFinished={turnsFinished}
-            onToggleMemory={async (allowed) => {
-              await mutate(
-                `/dots/${dot.id}`,
-                'PUT',
-                dotPayload(dot, { memoryAllowed: allowed }),
-              );
-            }}
             onClose={() => setComputerOpen(false)}
           />
         )}
@@ -486,6 +481,7 @@ export function App() {
             state={state}
             workspace={workspace}
             onClose={() => setDialog(undefined)}
+            onSpaceCreated={(space: StoredSpace) => openPage(space.id)}
             mutate={mutate}
           />
         )}

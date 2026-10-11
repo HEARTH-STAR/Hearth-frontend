@@ -35,7 +35,6 @@ export function PageDocument({
   onRefresh,
   onDeleted,
   onThread,
-  onSettings,
   onCreateDot,
 }: {
   page: Page;
@@ -50,7 +49,6 @@ export function PageDocument({
   onRefresh: () => void;
   onDeleted: (id: string) => void;
   onThread: (id: string) => void;
-  onSettings: () => void;
   onCreateDot: () => void;
 }) {
   const { controller, state } = usePageAutosave(page, onSaved);
@@ -352,7 +350,6 @@ export function PageDocument({
           paused={paused}
           beforeChat={beforeChat}
           onRefresh={onRefresh}
-          onSettings={onSettings}
           onCreateDot={onCreateDot}
           onOpenChange={setChatOpen}
         />

@@ -43,7 +43,6 @@ const props = () => ({
   onDeleted: vi.fn(),
   onSchedule: vi.fn(),
   onThread: vi.fn(),
-  onSettings: vi.fn(),
   onCreateDot: vi.fn(),
 });
 const deletion = () =>

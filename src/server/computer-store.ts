@@ -4,14 +4,12 @@ import {
   defaultPermissions,
   type ComputerActivity,
   type ComputerPermissions,
-  type ContainerRecord,
 } from '../shared/computer-types.js';
 const KEPT_ACTIVITY = 500;
 const DETAIL_LIMIT = 8000;
 export class ComputerStore {
   constructor(private db: DatabaseSync) {
     db.exec(`CREATE TABLE IF NOT EXISTS computer_permissions(dotId TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS computer_containers(dotId TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS computer_activity(id TEXT PRIMARY KEY, dotId TEXT NOT NULL, threadId TEXT, tool TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT, outcome TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS computer_activity_dot ON computer_activity(dotId, createdAt);`);
   }
@@ -29,18 +27,6 @@ export class ComputerStore {
       .prepare('INSERT OR REPLACE INTO computer_permissions VALUES (?, ?)')
       .run(dotId, JSON.stringify(value));
     return value;
-  }
-  container(dotId: string): ContainerRecord | null {
-    const row = this.db
-      .prepare('SELECT value FROM computer_containers WHERE dotId=?')
-      .get(dotId);
-    return row ? (JSON.parse(String(row.value)) as ContainerRecord) : null;
-  }
-  saveContainer(dotId: string, record: ContainerRecord) {
-    this.db
-      .prepare('INSERT OR REPLACE INTO computer_containers VALUES (?, ?)')
-      .run(dotId, JSON.stringify(record));
-    return record;
   }
   begin(
     dotId: string,

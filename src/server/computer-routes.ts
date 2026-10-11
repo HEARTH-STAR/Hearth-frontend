@@ -1,8 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ComputerService } from './computer-service.js';
-import { HearthBackendError } from './hearth-backend.js';
-import { HearthCoreError } from './hearth-core.js';
+import { spaceFailure } from './space-service.js';
 export function computerRoutes(computers: ComputerService) {
   const app = new Hono();
   app.onError((error, c) => {
@@ -10,14 +9,8 @@ export function computerRoutes(computers: ComputerService) {
       return c.json({ error: 'Invalid computer request.' }, 400);
     if (error.message === 'Dot not found.')
       return c.json({ error: error.message }, 404);
-    if (
-      error instanceof HearthCoreError ||
-      error instanceof HearthBackendError
-    ) {
-      const status =
-        error.status === 404 ? 404 : error.status === 400 ? 400 : 502;
-      return c.json({ error: error.message }, status);
-    }
+    const failure = spaceFailure(error);
+    if (failure) return c.json(failure.body, failure.status);
     return c.json({ error: error.message || 'Computer request failed.' }, 500);
   });
   app.get('/dots/:id/computer', async (c) =>
@@ -25,9 +18,6 @@ export function computerRoutes(computers: ComputerService) {
   );
   app.patch('/dots/:id/computer/permissions', async (c) =>
     c.json(computers.permissions(c.req.param('id'), await c.req.json())),
-  );
-  app.post('/dots/:id/computer/container', async (c) =>
-    c.json(await computers.spinUp(c.req.param('id')), 201),
   );
   app.get('/dots/:id/computer/files', async (c) =>
     c.json(await computers.files(c.req.param('id'), c.req.raw.signal)),

@@ -8,7 +8,6 @@ const dotSchema = z
     name: z.string().trim().min(1).max(40),
     role: z.string().trim().max(40).default(''),
     instructions: z.string().trim().min(3).max(2000),
-    memoryAllowed: z.boolean(),
     directory: folderPath.optional(),
     spaceIds: z.array(z.string().min(1)).min(1).max(100).optional(),
     spaceId: z.string().min(1),
@@ -17,31 +16,17 @@ const dotSchema = z
 export function workspaceRoutes(platform: Platform) {
   const app = new Hono();
   app.route('/', pageRoutes(platform));
-  app.get('/workspace', async (c) =>
-    c.json({
-      spaces: platform.workspace.spaces(),
+  app.get('/workspace', async (c) => {
+    const [spaces, setup] = await Promise.all([
+      platform.spaces.list(),
+      platform.setup(),
+    ]);
+    return c.json({
+      spaces,
       dots: platform.workspace.dots(),
       conversations: platform.workspace.conversations(),
-      setup: await platform.setup(),
-    }),
-  );
-  app.post('/spaces', async (c) => {
-    const data = z
-      .object({
-        name: z.string().trim().min(1).max(60),
-        description: z.string().max(500).default(''),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null));
-    if (!data.success)
-      return c.json(
-        { error: 'Enter a Space name (up to 60 characters).' },
-        400,
-      );
-    return c.json(
-      platform.workspace.createSpace(data.data.name, data.data.description),
-      201,
-    );
+      setup,
+    });
   });
   app.post('/dots', async (c) => {
     const data = dotSchema.safeParse(await c.req.json().catch(() => null));

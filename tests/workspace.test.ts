@@ -11,16 +11,21 @@ it('persists spaces, specialists with a role and folder, and canonical thread ow
     name: 'Scout Prime!',
     role: 'Researcher',
     instructions: 'Be concise',
-    memoryAllowed: false,
   });
   expect(dot.directory).toBe(`dots/scout-prime-${dot.id.slice(0, 8)}`);
   store.bindThread('thread-1', dot.id, 'Design research');
   expect(store.requireThread('thread-1', dot.id).ownerId).toBe('owner');
   expect(() => store.requireThread('thread-1', 'another-dot')).toThrow();
   expect(() => store.requireThread('unknown')).toThrow();
-  expect(store.dot(dot.id)).toMatchObject({
+  expect(store.dot(dot.id)).toEqual({
+    id: dot.id,
+    spaceId: space.id,
+    spaceIds: [space.id],
+    name: 'Scout Prime!',
     role: 'Researcher',
-    memoryAllowed: false,
+    instructions: 'Be concise',
+    directory: dot.directory,
+    createdAt: dot.createdAt,
   });
   store.close();
 });
@@ -32,7 +37,6 @@ it('rejects a dot in a nonexistent space and does not rebind an existing thread'
       name: 'Dot',
       role: '',
       instructions: 'Help',
-      memoryAllowed: true,
     }),
   ).toThrow();
   const dots = store.dots();

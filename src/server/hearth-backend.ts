@@ -1,11 +1,14 @@
-// Hearth-backend's HTTP API: Docker status and container spin-up from templates.
+// Hearth-backend's HTTP API: Docker status, and the containers Spaces run in.
 export interface BackendContainer {
   id: string;
   short_id: string;
   name: string;
   template: string;
   image: string;
+  /** Docker's status: running, exited, created, … */
   status: string;
+  /** Container port → the 127.0.0.1 port Docker published it on, e.g. ``{"5010": 49153}``. */
+  ports?: Record<string, number>;
 }
 export class HearthBackendError extends Error {
   constructor(
@@ -68,5 +71,21 @@ export class HearthBackend {
       method: 'POST',
       body: JSON.stringify({ name, ...(template ? { template } : {}) }),
     })) as BackendContainer;
+  }
+  /** One Hearth container with its published ports; 404 when Docker has no such container. */
+  async container(
+    name: string,
+    signal?: AbortSignal,
+  ): Promise<BackendContainer> {
+    return (await this.request(`/api/containers/${encodeURIComponent(name)}`, {
+      signal,
+    })) as BackendContainer;
+  }
+  /** Starts a stopped container; Docker may publish it on new host ports. */
+  async start(name: string): Promise<BackendContainer> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/start`,
+      { method: 'POST', body: '{}' },
+    )) as BackendContainer;
   }
 }

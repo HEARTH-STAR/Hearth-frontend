@@ -75,7 +75,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SAGARRAMBADE21/Hearth-frontend.git"
+    "url": "git+https://github.com/HEARTH-STAR/Hearth-frontend.git"
   },
   "overrides": {
     "undici": "^6.29.0"

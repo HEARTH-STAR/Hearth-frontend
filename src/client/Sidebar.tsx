@@ -1,18 +1,18 @@
-import {
-  BookOpen,
-  Folder,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Settings2,
-} from 'lucide-react';
+import { Folder, MoreHorizontal, Plus, Search, Settings2 } from 'lucide-react';
 import { Mascot } from './Mascot';
-import type {
-  Conversation,
-  Dot,
-  Settings,
-  WorkspaceState,
-} from '../shared/types';
+import { STAGE_LABEL, working } from './space-stage';
+import type { Conversation, Dot, Space, WorkspaceState } from '../shared/types';
+/** One word for the Space's dot in the sidebar: ready, working, or needs setup. */
+export function spaceHealth(space: Space) {
+  if (space.stage === 'ready')
+    return space.claude === false ? 'setup' : 'ready';
+  return working(space.stage) ? 'working' : 'setup';
+}
+function spaceTitle(space: Space) {
+  if (space.stage === 'ready' && space.claude === false)
+    return 'Running · Claude Code is not signed in';
+  return STAGE_LABEL[space.stage];
+}
 /** ``11:42 AM`` today, ``Mon`` this week, ``Oct 3`` before that. */
 export function shortTime(at: number, now = Date.now()) {
   const date = new Date(at);
@@ -22,14 +22,6 @@ export function shortTime(at: number, now = Date.now()) {
   if (now - at < 6 * 24 * 3600 * 1000)
     return date.toLocaleDateString([], { weekday: 'short' });
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-export function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  return (
-    parts.length > 1
-      ? parts[0][0] + parts.at(-1)![0]
-      : (parts[0] ?? '?').slice(0, 2)
-  ).toUpperCase();
 }
 export function latestConversation(
   conversations: Conversation[],
@@ -41,12 +33,10 @@ export function latestConversation(
 }
 export function Sidebar({
   workspace,
-  settings,
   open,
   search,
   activeDot,
   activeSpace,
-  memoryActive,
   onSearch,
   onNew,
   onDot,
@@ -54,16 +44,13 @@ export function Sidebar({
   onCreateDot,
   onSpace,
   onCreateSpace,
-  onMemory,
   onSettings,
 }: {
   workspace: WorkspaceState;
-  settings: Settings;
   open: boolean;
   search: string;
   activeDot?: string;
   activeSpace?: string;
-  memoryActive: boolean;
   onSearch: (value: string) => void;
   onNew: () => void;
   onDot: (dot: Dot) => void;
@@ -71,7 +58,6 @@ export function Sidebar({
   onCreateDot: () => void;
   onSpace: (spaceId: string) => void;
   onCreateSpace: () => void;
-  onMemory: () => void;
   onSettings: () => void;
 }) {
   const query = search.trim().toLowerCase();
@@ -141,6 +127,12 @@ export function Sidebar({
             <Folder size={16} aria-hidden="true" />
             <span className="nav-row-name">{space.name}</span>
             {space.pageCount > 0 && <small>{space.pageCount}</small>}
+            <span
+              className={`space-health ${spaceHealth(space)}`}
+              title={spaceTitle(space)}
+              aria-label={spaceTitle(space)}
+              role="img"
+            />
           </button>
         ))}
         {!spaces.length && <p className="sidebar-empty">No Spaces match.</p>}
@@ -187,22 +179,9 @@ export function Sidebar({
         {!dots.length && <p className="sidebar-empty">No Dots match.</p>}
       </nav>
       <div className="sidebar-foot">
-        <button
-          className={`nav-row ${memoryActive ? 'active' : ''}`}
-          onClick={onMemory}
-        >
-          <BookOpen size={16} aria-hidden="true" />
-          <span className="nav-row-name">Memory</span>
-        </button>
         <button className="nav-row" onClick={onSettings}>
           <Settings2 size={16} aria-hidden="true" />
           <span className="nav-row-name">Settings</span>
-        </button>
-        <button className="nav-row owner-row" onClick={onSettings}>
-          <span className="owner-avatar" aria-hidden="true">
-            {initials(settings.name)}
-          </span>
-          <span className="nav-row-name">{settings.name}</span>
         </button>
       </div>
     </aside>

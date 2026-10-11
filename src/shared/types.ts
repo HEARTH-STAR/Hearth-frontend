@@ -1,24 +1,39 @@
 export interface Settings {
-  /** The owner's display name, shown at the foot of the sidebar. */
+  /** The owner's name, which Dots use for the workspace (set in Settings). */
   name: string;
   paused: boolean;
-  memoryAllowed: boolean;
-}
-export interface Memory {
-  id: string;
-  text: string;
-  createdAt: number;
 }
 export interface State {
   settings: Settings;
-  memories: Memory[];
 }
-export interface Space {
+/** A Space as stored. Each Space runs in its own container, where its Hearth-Core and Claude Code live. */
+export interface StoredSpace {
   id: string;
   name: string;
   description: string;
   createdAt: number;
   pageCount: number;
+  /** The Space's container (its Docker name), once one was spun up. */
+  container: string | null;
+}
+/**
+ * Where a Space's container is: ``none`` before the first start, ``creating`` while Hearth-backend
+ * spins it up, ``booting`` while Hearth-Core inside installs and starts, ``ready`` once it answers.
+ * ``stopped``, ``missing`` and ``failed`` need a start; ``unknown`` means Hearth-backend did not answer.
+ */
+export type SpaceStage =
+  | 'none'
+  | 'creating'
+  | 'booting'
+  | 'ready'
+  | 'stopped'
+  | 'missing'
+  | 'failed'
+  | 'unknown';
+export interface Space extends StoredSpace {
+  stage: SpaceStage;
+  /** Whether Claude Code is signed in inside the container; null until the container answers. */
+  claude: boolean | null;
 }
 export interface Dot {
   id: string;
@@ -31,7 +46,6 @@ export interface Dot {
   instructions: string;
   /** This Dot's folder in the Hearth-Core workspace: its computer's files. */
   directory: string;
-  memoryAllowed: boolean;
   createdAt: number;
 }
 export interface Conversation {
@@ -47,16 +61,75 @@ export interface Conversation {
 export interface ServiceStatus {
   url: string;
   reachable: boolean;
-  /** What answered, such as the Hearth-Core agent or the Docker version. */
+  /** What answered, such as the Docker version. */
   detail?: string;
   error?: string;
+  /** Whether Hearth-backend's Docker daemon answers, which Space containers need. */
+  docker?: boolean;
 }
 export interface SetupStatus {
-  core: ServiceStatus;
   backend: ServiceStatus;
-  /** What stops conversations from running; empty when Hearth-Core answers. */
+  /** What stops Spaces from starting; empty when Hearth-backend and its Docker answer. */
   missing: string[];
 }
+/** Claude Code inside a Space's container: the account it is signed in to, never a credential. */
+export interface ClaudeStatus {
+  connected: boolean;
+  /** ``claude.ai`` for a Claude subscription login, ``api_key`` for a key. */
+  method: string | null;
+  email: string | null;
+  organization: string | null;
+  subscription: string | null;
+  /** Whether Hearth-Core can run the sign-in there (it needs a Linux container). */
+  loginSupported: boolean;
+  error?: string;
+}
+export interface ClaudeLogin {
+  sessionId: string;
+  /** The claude.com page where the owner approves; it then shows a code to paste back. */
+  authUrl: string;
+  expiresIn: number;
+}
+export interface ClaudeLoginState {
+  status: 'pending' | 'connected' | 'invalid_code' | 'failed' | 'cancelled';
+  error?: string;
+  /** The account, once connected. */
+  claude?: ClaudeStatus;
+}
+/** One Space's setup: its container, then Claude Code, then GitHub, all inside the container. */
+export interface SpaceSetup {
+  stage: SpaceStage;
+  container: string | null;
+  /** Docker's status for the container: running, exited, … */
+  status: string | null;
+  /** Where this server reaches the Space's Hearth-Core. */
+  coreUrl: string | null;
+  error?: string;
+  /** Null until Hearth-Core in the container answers. */
+  claude: ClaudeStatus | null;
+  github: GitHubStatus | null;
+}
+/** The Space's GitHub account, held by the gh CLI inside its container. */
+export interface GitHubStatus {
+  connected: boolean;
+  username: string | null;
+  name: string | null;
+  /** How it was connected; ``terminal`` means gh was signed in outside Hearth. */
+  method: 'device' | 'token' | 'terminal' | null;
+  expiresAt: string | null;
+  warnings: string[];
+  /** ``gh auth status`` as gh printed it. */
+  detail: string | null;
+}
+export interface GitHubDeviceLogin {
+  sessionId: string;
+  userCode: string;
+  verificationUri: string;
+  expiresIn: number;
+}
+export type GitHubDevicePoll =
+  | { pending: true; userCode: string; verificationUri: string }
+  | { pending: false; status: GitHubStatus };
 export interface WorkspaceState {
   spaces: Space[];
   dots: Dot[];

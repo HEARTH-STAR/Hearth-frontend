@@ -16,21 +16,13 @@ function databasePath() {
   dirs.push(dir);
   return join(dir, 'test.sqlite');
 }
-it('persists settings and memories across connections', () => {
+it('persists settings across connections', () => {
   const path = databasePath();
   const store = new Store(path);
   store.updateSettings({ name: 'Sam', paused: true });
-  store.saveMemory('Prefer short briefs');
   store.close();
   const reopened = new Store(path);
-  expect(reopened.settings()).toEqual({
-    name: 'Sam',
-    paused: true,
-    memoryAllowed: true,
-  });
-  expect(reopened.memories().map((memory) => memory.text)).toEqual([
-    'Prefer short briefs',
-  ]);
+  expect(reopened.settings()).toEqual({ name: 'Sam', paused: true });
   reopened.close();
 });
 it('drops settings an older version saved instead of returning them', () => {
@@ -49,20 +41,6 @@ it('drops settings an older version saved instead of returning them', () => {
   );
   legacy.close();
   const store = new Store(path);
-  expect(store.settings()).toEqual({
-    name: 'Dot',
-    paused: false,
-    memoryAllowed: false,
-  });
-  store.close();
-});
-it('edits and deletes memories by id', () => {
-  const store = new Store(':memory:');
-  const memory = store.saveMemory('First');
-  store.saveMemory('Edited', memory.id);
-  expect(store.memories()).toHaveLength(1);
-  expect(store.memories()[0].text).toBe('Edited');
-  expect(store.deleteMemory(memory.id)).toBe(true);
-  expect(store.deleteMemory(memory.id)).toBe(false);
+  expect(store.settings()).toEqual({ name: 'Dot', paused: false });
   store.close();
 });

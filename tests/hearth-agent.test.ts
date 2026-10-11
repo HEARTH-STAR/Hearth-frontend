@@ -8,6 +8,7 @@ import {
   turnMessage,
 } from '../src/server/hearth-agent.js';
 import { HearthCore, type CoreEvent } from '../src/server/hearth-core.js';
+import { SpaceNotReady } from '../src/server/space-service.js';
 import { pageReviewTool } from '../src/shared/page-review.js';
 import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
@@ -33,7 +34,7 @@ function setup(
     {
       store,
       workspace,
-      core: new HearthCore('http://core.test', core.fetch),
+      core: async () => new HearthCore('http://core.test', core.fetch),
       config: {},
     },
     dot.id,
@@ -124,28 +125,25 @@ it('continues after the owner approves a review, once', async () => {
     message: 'There is no new message to send.',
   });
 });
-it('describes the Dot, shares memories only when given, and names its Spaces', () => {
+it('describes the Dot and names its Spaces', () => {
   const workspace = new WorkspaceStore(':memory:', 'owner');
   open.push(workspace);
   const dot = workspace.dots()[0];
   const prompt = systemPrompt({
     dot,
-    settings: { name: 'Sam', paused: false, memoryAllowed: true },
-    memories: [{ id: 'm', text: 'Keep it short', createdAt: 0 }],
+    settings: { name: 'Sam', paused: false },
     spaces: workspace.spaces(),
     review: true,
   });
   expect(prompt).toContain(
     'You are Scout, a Researcher: an assistant (a "Dot") in Sam\'s Hearth workspace.',
   );
-  expect(prompt).toContain('Keep it short');
   expect(prompt).toContain(`Everyday (id ${dot.spaceId})`);
   expect(prompt).toContain('review_space_page');
   expect(
     systemPrompt({
       dot,
-      settings: { name: 'Sam', paused: false, memoryAllowed: true },
-      memories: [],
+      settings: { name: 'Sam', paused: false },
       spaces: [],
       review: false,
     }),
@@ -317,6 +315,36 @@ it('reports Hearth-Core errors and calls that never finished', async () => {
   });
   expect(workspace.computers.activity(dot.id)[0].outcome).toBe('failed');
 });
+it('runs in the home Space’s container, and says so when it is not ready', async () => {
+  const { store, workspace, dot } = setup([done]);
+  const asked: string[] = [];
+  const agent = new HearthAgent(
+    {
+      store,
+      workspace,
+      config: {},
+      core: async (spaceId) => {
+        asked.push(spaceId);
+        throw new SpaceNotReady(
+          '“Everyday” has no container yet. Open the Space and start it.',
+          'none',
+        );
+      },
+    },
+    dot.id,
+  );
+  const events = await run(
+    agent,
+    input([{ id: 'u1', role: 'user', content: 'Hello' }]),
+  );
+  expect(asked).toEqual([dot.spaceId]);
+  expect(events.at(-1)).toMatchObject({
+    type: 'RUN_ERROR',
+    message: '“Everyday” has no container yet. Open the Space and start it.',
+  });
+  // nothing was sent, so nothing waits in the transcript as delivered
+  expect(workspace.transcript('thread-1')).toEqual([]);
+});
 it('refuses to start while paused, for an unknown thread, or with nothing new', async () => {
   const { agent, store, core } = setup([done]);
   store.updateSettings({ paused: true });
@@ -362,4 +390,97 @@ it('treats a stream that ends without done as an error', async () => {
     type: 'RUN_ERROR',
     message: 'Hearth-Core ended the turn before it finished.',
   });
+});
+const texts = (events: (BaseEvent & Record<string, unknown>)[]) => {
+  const messages = new Map<string, string>();
+  for (const event of events) {
+    if (event.type === 'TEXT_MESSAGE_START')
+      messages.set(String(event.messageId), '');
+    if (event.type === 'TEXT_MESSAGE_CONTENT')
+      messages.set(
+        String(event.messageId),
+        messages.get(String(event.messageId)) + String(event.delta),
+      );
+  }
+  return [...messages.values()];
+};
+it('streams text as it is written and does not repeat it when the full block arrives', async () => {
+  const { agent, workspace } = setup([
+    { type: 'token', token: 'Opening ', partial: true },
+    { type: 'model-loading', label: 'thinking', partial: true },
+    { type: 'token', token: 'it.', partial: true },
+    { type: 'token', token: 'Opening it.' },
+    { type: 'tool-call', tool: 'Read', tool_use_id: 'r1', input: {} },
+    { type: 'tool-result', tool: 'Read', tool_use_id: 'r1', output: 'text' },
+    { type: 'token', token: 'Here', partial: true },
+    { type: 'token', token: 'Here is more.' },
+    { type: 'token', token: 'Unstreamed block.' },
+    done,
+  ]);
+  const events = await run(
+    agent,
+    input([{ id: 'u', role: 'user', content: 'Open it' }]),
+  );
+  expect(events.at(-1)?.type).toBe('RUN_FINISHED');
+  expect(texts(events)).toEqual([
+    'Opening it.',
+    'Here is more.',
+    'Unstreamed block.',
+  ]);
+  const starts = events.filter((e) => e.type === 'TEXT_MESSAGE_START').length;
+  const ends = events.filter((e) => e.type === 'TEXT_MESSAGE_END').length;
+  expect([starts, ends]).toEqual([3, 3]);
+  expect(workspace.transcript('thread-1').at(-1)?.text).toBe(
+    'Opening it.\n\nHere is more.\n\nUnstreamed block.',
+  );
+});
+it('ends the turn quietly when the owner stops it, keeping what streamed', async () => {
+  const { agent, workspace } = setup([]);
+  const encoder = new TextEncoder();
+  const stuck = new HearthAgent(
+    {
+      store: new Store(':memory:'),
+      workspace,
+      config: {},
+      core: async () =>
+        new HearthCore('http://core.test', (async (
+          info: RequestInfo | URL,
+          init?: RequestInit,
+        ) => {
+          const signal = new Request(info, init).signal;
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({ type: 'token', token: 'Half a thou', partial: true })}\n\n`,
+                  ),
+                );
+                signal.addEventListener('abort', () =>
+                  controller.error(new DOMException('Aborted', 'AbortError')),
+                );
+              },
+            }),
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          );
+        }) as typeof fetch),
+    },
+    workspace.dots()[0].id,
+  );
+  void agent;
+  const events: (BaseEvent & Record<string, unknown>)[] = [];
+  await new Promise<void>((resolve) =>
+    stuck.run(input([{ id: 'u', role: 'user', content: 'Think' }])).subscribe({
+      next: (event) => {
+        events.push(event as BaseEvent & Record<string, unknown>);
+        if (event.type === 'TEXT_MESSAGE_CONTENT') stuck.abortRun();
+      },
+      complete: resolve,
+    }),
+  );
+  expect(events.map((e) => e.type).slice(-2)).toEqual([
+    'TEXT_MESSAGE_END',
+    'RUN_FINISHED',
+  ]);
+  expect(workspace.transcript('thread-1').at(-1)?.text).toBe('Half a thou');
 });

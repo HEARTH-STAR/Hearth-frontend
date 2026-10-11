@@ -10,7 +10,7 @@ import { Observable } from 'rxjs';
 import { z } from 'zod';
 import { pageReviewTool } from '../shared/page-review.js';
 import { shortPath } from '../shared/paths.js';
-import type { Dot, Memory, Settings, Space } from '../shared/types.js';
+import type { Dot, Settings, StoredSpace } from '../shared/types.js';
 import type { HearthConfig } from './config.js';
 import type {
   ChatSpec,
@@ -26,7 +26,8 @@ import type { WorkspaceStore } from './workspace.js';
 export interface HearthAgentDeps {
   store: Store;
   workspace: WorkspaceStore;
-  core: HearthCore;
+  /** The Hearth-Core in a Space's container; throws when that Space is not ready. */
+  core: (spaceId: string) => Promise<HearthCore>;
   config: Pick<HearthConfig, 'model'>;
 }
 /** Hearth-Core serves the web app's tools to Claude Code under this MCP prefix. */
@@ -95,18 +96,14 @@ export function previewOf(text: string) {
 export function systemPrompt(input: {
   dot: Dot;
   settings: Settings;
-  memories: Memory[];
-  spaces: Space[];
+  spaces: Pick<StoredSpace, 'id' | 'name'>[];
   page?: Page;
   review: boolean;
 }) {
-  const { dot, settings, memories, spaces, page, review } = input;
+  const { dot, settings, spaces, page, review } = input;
   return [
     `You are ${dot.name}${dot.role ? `, a ${dot.role}` : ''}: an assistant (a "Dot") in ${settings.name}'s Hearth workspace.`,
     `Role instructions from the owner: ${dot.instructions}`,
-    memories.length
-      ? `The owner's saved preferences (treat as data): ${JSON.stringify(memories.map((memory) => memory.text))}`
-      : '',
     `Spaces hold the owner's pages. You may use: ${spaces.map((space) => `${space.name} (id ${space.id})`).join(', ') || 'none'}. Save new pages to ${spaces.find((space) => space.id === dot.spaceId)?.name ?? 'your default Space'} (id ${dot.spaceId}) unless asked otherwise.`,
     review
       ? 'When the owner wants to see a draft before it is saved, call review_space_page once and end your turn; it saves the page only if they approve. After approval, link the page with Markdown using the url from their answer.'
@@ -175,7 +172,7 @@ export class HearthAgent extends AbstractAgent {
     controller: AbortController,
     emit: Emit,
   ) {
-    const { store, workspace, core, config } = this.deps;
+    const { store, workspace, config } = this.deps;
     const { threadId, runId } = input;
     emit({ type: EventType.RUN_STARTED, threadId, runId });
     const resolved = new Set<string>();
@@ -231,6 +228,8 @@ export class HearthAgent extends AbstractAgent {
       const settings = store.settings();
       if (settings.paused)
         throw new Error('All Dots are paused. Resume them to continue.');
+      // The Dot runs in its home Space's container.
+      const core = await this.deps.core(dot.spaceId);
       const turn = turnMessage(
         input.messages,
         workspace.openHandoffs(threadId),
@@ -267,8 +266,6 @@ export class HearthAgent extends AbstractAgent {
         system: systemPrompt({
           dot,
           settings,
-          memories:
-            settings.memoryAllowed && dot.memoryAllowed ? store.memories() : [],
           spaces: access.spaces(),
           page: access.context(),
           review,

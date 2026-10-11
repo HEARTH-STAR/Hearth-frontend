@@ -8,8 +8,8 @@ cp .env.example .env
 npm run dev        # API on 127.0.0.1:4310, app on http://127.0.0.1:5173
 ```
 
-Requires Node.js 24. Conversations need Hearth-Core (`../Hearth-Core`); containers need Hearth-backend
-(`../Hearth-backend`) and Docker.
+Requires Node.js 24. Conversations need [Hearth-Core](https://github.com/HEARTH-STAR/Hearth-Core) (`../Hearth-Core`); containers need
+[Hearth-backend](https://github.com/HEARTH-STAR/Hearth-backend) (`../Hearth-backend`) and Docker.
 
 ## Rules
 

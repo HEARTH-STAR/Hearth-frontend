@@ -1,4 +1,10 @@
+import { SqliteAgentRunner } from '@copilotkit/sqlite-runner';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
+import { clearInterruptedRuns } from '../src/server/platform.js';
 import { validateRuntimeScope } from '../src/server/runtime-scope.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 it('blocks unbound cross-Dot runs and every route the app does not use', () => {
@@ -57,4 +63,24 @@ it('rejects stop scope bypasses and misleading prefixes while allowing canonical
     ),
   ).not.toThrow();
   store.close();
+});
+it('clears runs a restart cut short so their conversations can run again', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hearth-threads-'));
+  const path = join(dir, 'threads.sqlite');
+  try {
+    clearInterruptedRuns(path); // no file yet: nothing to do
+    const runner = new SqliteAgentRunner({ dbPath: path });
+    runner.close();
+    const db = new DatabaseSync(path);
+    db.exec(
+      "INSERT INTO run_state VALUES ('thread-a', 1, 'run-1', 0), ('thread-b', 0, NULL, 0)",
+    );
+    db.close();
+    clearInterruptedRuns(path);
+    const reopened = new SqliteAgentRunner({ dbPath: path });
+    expect(await reopened.isRunning({ threadId: 'thread-a' })).toBe(false);
+    reopened.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
