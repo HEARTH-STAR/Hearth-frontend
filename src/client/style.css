@@ -979,22 +979,18 @@ body.resizing-computer {
   cursor: col-resize;
   user-select: none;
 }
+body.resizing-cols {
+  cursor: col-resize;
+  user-select: none;
+}
+body.resizing-rows {
+  cursor: row-resize;
+  user-select: none;
+}
 .computer-head-actions {
   display: flex;
   align-items: center;
   gap: 2px;
-}
-/* Wide enough: the file tree and the open file side by side. */
-@container (min-width: 640px) {
-  .computer-files {
-    flex-direction: row;
-  }
-  .files-tree {
-    flex: 0 0 min(320px, 38%);
-  }
-  .file-view {
-    flex: 1 1 auto;
-  }
 }
 .computer-head {
   display: flex;
@@ -1066,91 +1062,203 @@ body.resizing-computer {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 0 16px;
+  padding: 0 16px 16px;
 }
 .computer-body > section {
   flex: 1;
   min-height: 0;
 }
-.computer-files {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.files-tree,
-.file-view {
+/* theme: fixed .code-workspace */
+/* The Files tab, editor-style: the tree and the open file, in Pierre Dark (code-view.ts). Stacked
+   in a narrow panel, side by side once it is wide. */
+.code-workspace {
+  /* The tree's share; dragging the splitter sets these inline. */
+  --tree-width: min(300px, 34%);
+  --tree-height: 42%;
+  display: grid;
+  grid-template-rows:
+    minmax(100px, min(var(--tree-height), calc(100% - 126px)))
+    6px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid #262626;
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--code-bg);
+  color: var(--code-fg);
 }
-.files-tree {
-  flex: 1 1 45%;
-  min-height: 170px;
+.code-sidebar {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--code-sidebar);
 }
-.file-tree {
+/* Between the tree and the code: drag to resize. */
+.code-splitter {
+  position: relative;
+  background: var(--code-sidebar);
+  border-bottom: 1px solid #262626;
+  cursor: row-resize;
+  touch-action: none;
+}
+.code-splitter::after {
+  content: '';
+  position: absolute;
+  inset: 2px 0;
+  background: transparent;
+  transition: background 0.15s;
+}
+.code-splitter:hover::after,
+.code-splitter:focus-visible::after,
+body.resizing-rows .code-splitter::after,
+body.resizing-cols .code-splitter::after {
+  background: #009fff;
+}
+.code-splitter:focus-visible {
+  outline: none;
+}
+.code-sidebar .file-tree {
   display: block;
   flex: 1;
   min-height: 0;
   height: 100%;
-  --trees-bg-override: #ffffff;
-  --trees-fg-override: #3d3f47;
-  --trees-fg-muted-override: #868892;
-  --trees-selected-bg-override: #eceefa;
-  --trees-border-color-override: #e8e6e1;
-  --trees-accent-override: #6f7fd0;
   --trees-font-size-override: 12.5px;
   --trees-font-family-override: inherit;
 }
-.file-view {
-  flex: 1 1 55%;
+.code-tree-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--code-muted);
+}
+.code-tree-head small {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.code-editor {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--code-bg);
 }
-.file-view-head {
-  display: flex;
+.code-editor.empty {
   align-items: center;
-  gap: 8px;
-  padding: 5px 6px 5px 12px;
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-  color: #55575f;
+  justify-content: center;
 }
-.file-view-head span {
-  flex: 1;
-  min-width: 0;
+.code-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 10px 0;
+  background: var(--code-tabs);
+  border-bottom: 1px solid #262626;
+}
+.code-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 75%;
+  margin-bottom: -1px;
+  padding: 6px 6px 7px 10px;
+  border: 1px solid #262626;
+  border-bottom-color: var(--code-bg);
+  border-radius: 8px 8px 0 0;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-size: 12.5px;
+}
+.code-tab span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-view-head small {
-  color: var(--muted);
+.code-tab .icon-button {
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--code-muted);
 }
-.file-view pre {
+.code-tab .icon-button:hover:not(:disabled) {
+  background: #262626;
+  color: var(--code-fg);
+}
+.code-size {
+  margin: 0 0 8px auto;
+  font-size: 11px;
+  color: var(--code-muted);
+}
+.code-body {
   flex: 1;
-  margin: 0;
-  padding: 10px 12px;
+  min-height: 0;
   overflow: auto;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.55;
-  color: #3d3f47;
 }
+.code-body:focus-visible {
+  outline: none;
+}
+.code-lines pre.shiki {
+  margin: 0;
+  padding: 10px 0 16px;
+  background: transparent !important;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  counter-reset: line;
+}
+.code-lines code {
+  display: block;
+  min-width: max-content;
+  padding-right: 16px;
+}
+.code-lines .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3.4em;
+  margin-right: 1.4em;
+  text-align: right;
+  color: var(--code-line-number);
+  user-select: none;
+}
+.code-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--code-muted);
+  font-size: 12.5px;
+}
+.code-empty.failed {
+  color: #ff6762;
+}
+@container (min-width: 640px) {
+  .code-workspace {
+    grid-template-rows: none;
+    grid-template-columns:
+      minmax(160px, min(var(--tree-width), calc(100% - 226px)))
+      6px minmax(0, 1fr);
+  }
+  .code-splitter {
+    border-bottom: 0;
+    border-right: 1px solid #262626;
+    cursor: col-resize;
+  }
+  .code-splitter::after {
+    inset: 0 2px;
+  }
+}
+/* theme: end */
 .computer-empty {
   margin: 0;
   padding: 18px 14px;
   color: var(--muted);
   font-size: 12.5px;
-}
-.computer-hint {
-  margin: 0;
-  padding: 6px 12px;
-  font-size: 11px;
-  color: var(--muted);
-  border-top: 1px solid var(--line);
 }
 /* theme: fixed .computer-shell */
 /* The terminal: a shell in the Dot's container (xterm.js). */
@@ -1247,32 +1355,6 @@ body.resizing-computer {
 .activity-list time {
   font-size: 11px;
   color: var(--muted);
-}
-.computer-perms {
-  padding: 12px 16px 16px;
-}
-.computer-perms > span {
-  font-size: 12px;
-  color: var(--muted);
-}
-.computer-perms > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-.chip {
-  padding: 4px 10px;
-  border: 1px dashed #d6d4ce;
-  border-radius: 7px;
-  background: transparent;
-  font-size: 12px;
-  color: #9a9ca4;
-}
-.chip[aria-pressed='true'] {
-  border: 1px solid #e4e2dc;
-  background: #ebe9e4;
-  color: #3d3f47;
 }
 
 /* A Space's health in the sidebar: ready, on its way, or waiting for setup */

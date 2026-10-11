@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { FileTree, useFileTree } from '@pierre/trees/react';
+import { treeStyles } from './code-view';
 
 /** ``a/b/c.md`` → ``["a/", "a/b/"]``: the folders on the way, as the tree names them. */
 export function foldersOf(path: string) {
@@ -13,18 +14,21 @@ function allFolders(files: string[]) {
   return [...new Set(files.flatMap(foldersOf))];
 }
 /**
- * The container's workspace as a tree (trees.software, ``@pierre/trees``). ``files`` are paths
+ * The container's workspace as a tree (trees.software, ``@pierre/trees``), in Pierre Dark. ``files`` are paths
  * relative to the workspace, with a trailing "/" for empty folders, as Hearth-Core lists them.
  * Folders start closed except ``open`` (the Dot's own folder) and the way to it.
  */
 export function FileTreeView({
   files,
   open,
+  header,
   selected,
   onSelect,
 }: {
   files: string[];
   open?: string;
+  /** Shown above the tree, like an editor's explorer title. */
+  header?: ReactNode;
   selected: string | null;
   onSelect: (path: string) => void;
 }) {
@@ -36,7 +40,7 @@ export function FileTreeView({
     initialExpandedPaths: open ? foldersOf(`${open}/`) : [],
     flattenEmptyDirectories: true,
     density: 'compact',
-    icons: { set: 'standard', colored: true },
+    icons: { set: 'complete', colored: true },
     initialSelectedPaths: selected ? [selected] : [],
     onSelectionChange: (paths) => {
       const path = paths[0];
@@ -71,5 +75,12 @@ export function FileTreeView({
       model.scrollToPath(selected, { focus: false, offset: 'nearest' });
     }
   }, [model, selected, key]);
-  return <FileTree model={model} className="file-tree" />;
+  return (
+    <FileTree
+      model={model}
+      className="file-tree"
+      style={treeStyles}
+      header={header}
+    />
+  );
 }

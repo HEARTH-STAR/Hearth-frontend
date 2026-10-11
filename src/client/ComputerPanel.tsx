@@ -1,15 +1,23 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Ban, Check, FileText, Maximize2, Minimize2, X } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
+import { Ban, Check, Maximize2, Minimize2, X } from 'lucide-react';
 import type {
-  ComputerPermissions,
   ComputerStatus,
   WorkspaceFile,
   WorkspaceListing,
 } from '../shared/computer-types';
-import { formatBytes } from '../shared/paths';
 import type { Dot } from '../shared/types';
 import { api } from './api';
+import { CodeView } from './CodeView';
+import { editorStyles } from './code-view';
 import { FileTreeView } from './FileTreeView';
+import { FilesSplitter } from './FilesSplitter';
+import { saveTreeSize, savedTreeSize, type TreeSize } from './files-split';
 import { TerminalView } from './TerminalView';
 import { DEFAULT_COMPUTER_WIDTH, MIN_COMPUTER_WIDTH } from './computer-size';
 type Tab = 'Files' | 'Terminal' | 'Activity';
@@ -65,7 +73,6 @@ export function ComputerPanel({
   const [selected, setSelected] = useState<string | null>(null);
   const [file, setFile] = useState<WorkspaceFile>();
   const [fileError, setFileError] = useState('');
-  const [busy, setBusy] = useState('');
   // The terminal connects the first time its tab opens, then stays connected while the panel is.
   const [terminalOpened, setTerminalOpened] = useState(false);
   useEffect(() => {
@@ -73,6 +80,18 @@ export function ComputerPanel({
   }, [tab]);
   // The Files tab shows the container's whole workspace; the Dot's own folder starts open.
   const folder = status?.directory ?? dot.directory;
+  // How much room the tree takes beside (or above) the open file, as the owner dragged it.
+  const workspace = useRef<HTMLElement>(null);
+  const [treeSize, setTreeSize] = useState<TreeSize>(savedTreeSize);
+  const resizeTree = useCallback(
+    (axis: keyof TreeSize, size: number | undefined, done: boolean) =>
+      setTreeSize((current) => {
+        const next = { ...current, [axis]: size };
+        if (done) saveTreeSize(next);
+        return next;
+      }),
+    [],
+  );
   const loadStatus = useCallback(async () => {
     try {
       setStatus(await api<ComputerStatus>(base));
@@ -126,17 +145,6 @@ export function ComputerPanel({
       active = false;
     };
   }, [base, selected, turnsFinished]);
-  const permission = async (key: keyof ComputerPermissions, value: boolean) => {
-    setBusy(key);
-    try {
-      await api(`${base}/permissions`, 'PATCH', { [key]: value });
-      await loadStatus();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save.');
-    } finally {
-      setBusy('');
-    }
-  };
   // Esc leaves full screen.
   useEffect(() => {
     if (!expanded) return;
@@ -242,57 +250,52 @@ export function ComputerPanel({
       )}
       <div className="computer-body">
         {tab === 'Files' && (
-          <section className="computer-files" aria-label="Files">
-            <div className="files-tree">
+          <section
+            className="code-workspace"
+            aria-label="Files"
+            ref={workspace}
+            style={
+              {
+                ...editorStyles,
+                ...(treeSize.width
+                  ? { '--tree-width': `${treeSize.width}px` }
+                  : {}),
+                ...(treeSize.height
+                  ? { '--tree-height': `${treeSize.height}px` }
+                  : {}),
+              } as CSSProperties
+            }
+          >
+            <div className="code-sidebar">
               {listing?.files.length ? (
                 <FileTreeView
                   files={listing.files}
                   open={folder}
                   selected={selected}
                   onSelect={setSelected}
+                  header={
+                    <div className="code-tree-head">
+                      <span>workspace</span>
+                      {listing.truncated && <small>first 5,000 files</small>}
+                    </div>
+                  }
                 />
               ) : (
-                <p className="computer-empty">
+                <p className="code-empty">
                   {listingError ||
                     (listing
                       ? `${dot.name}’s container has no files yet.`
                       : 'Loading files…')}
                 </p>
               )}
-              {listing?.truncated && (
-                <p className="computer-hint">Showing the first 5,000 files.</p>
-              )}
             </div>
-            {selected && (
-              <div className="file-view">
-                <div className="file-view-head">
-                  <FileText size={14} aria-hidden="true" />
-                  <span title={selected}>{selected}</span>
-                  {file && <small>{formatBytes(file.size)}</small>}
-                  <button
-                    className="icon-button"
-                    aria-label="Close file"
-                    onClick={() => setSelected(null)}
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-                {fileError ? (
-                  <p className="computer-error">{fileError}</p>
-                ) : !file ? (
-                  <p className="computer-empty">Opening…</p>
-                ) : file.binary ? (
-                  <p className="computer-empty">
-                    This is a binary file ({formatBytes(file.size)}).
-                  </p>
-                ) : (
-                  <pre tabIndex={0}>
-                    {file.text}
-                    {file.truncated && '\n…'}
-                  </pre>
-                )}
-              </div>
-            )}
+            <FilesSplitter workspace={workspace} onSize={resizeTree} />
+            <CodeView
+              path={selected}
+              file={file}
+              error={fileError}
+              onClose={() => setSelected(null)}
+            />
           </section>
         )}
         {terminalOpened && (
@@ -326,27 +329,6 @@ export function ComputerPanel({
             )}
           </section>
         )}
-      </div>
-      <div className="computer-perms">
-        <span>Permissions</span>
-        <div>
-          {(['files', 'shell'] as const).map((key) => (
-            <button
-              key={key}
-              className="chip"
-              aria-pressed={!!status?.permissions[key]}
-              disabled={!status || !!busy}
-              title={
-                key === 'files'
-                  ? 'Create and edit files in its folder'
-                  : 'Run commands (the Hearth-Core policy still blocks network tools, sudo and git remotes)'
-              }
-              onClick={() => void permission(key, !status?.permissions[key])}
-            >
-              {key === 'files' ? 'Files' : 'Shell'}
-            </button>
-          ))}
-        </div>
       </div>
     </aside>
   );
