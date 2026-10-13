@@ -12,7 +12,8 @@
   home to one Dot carries that Dot's name (`WorkspaceStore.nameSpacesAfterDots`, also on rename and at startup). Its
   setup is container → Claude Code sign-in → GitHub, both signed in inside the container through its Hearth-Core.
   A Dot runs in its Space (`dot.spaceId`): chat, files and permissions all go there.
-- The sidebar lists Dots only. A Dot's "…" menu (`DotMenu` in `Sidebar.tsx`) opens its Space's Setup page
+- The + next to Hearth spins up a new Dot (name only: `POST /api/dots` defaults the instructions to
+  `DEFAULT_INSTRUCTIONS` and gives it its own Space and container). The sidebar lists Dots only. A Dot's "…" menu (`DotMenu` in `Sidebar.tsx`) opens its Space's Setup page
   (`#/spaces/:id/setup`) and its Pages (`#/spaces/:id`). Keep the mascots.
 - Vite + React client (`src/client`), Hono server (`src/server`), shared types (`src/shared`).
 
@@ -39,6 +40,11 @@
   `review_space_page` is a `handoff` tool: the turn ends with the review card, the server records an open
   handoff, and the owner's answer is sent next turn wherever CopilotKit placed it in the history.
 - Claude Code tool names reach the client bare (`mcp__client__` stripped). `ToolRow.tsx` renders them.
+- Replies render in `ChatTranscript.tsx`: `reply-sections.ts` (a remark plugin) makes each section under the reply's top
+  headings (or under two or more bold-only title lines) a `.reply-card`, and any other reply one untitled card
+  (`.reply-card.whole`), so every reply is carded; `CodeCard.tsx` gives code blocks a language
+  label and Copy. The owner's messages stay plain. `REPLY_FORMAT` in `hearth-agent.ts` asks every turn for `## `
+  sections, so longer answers come out as cards in every conversation.
 
 ## Conventions
 

@@ -63,7 +63,8 @@ From the folder that holds the repos (Hearth-Core runs inside each Space, not he
 Production: `npm run build && npm start` serves everything on `http://127.0.0.1:4310`.
 
 Each Dot is a Space: its own container, under the Dot's name. The first Dot, Scout, is there
-already; **+** next to DOTS adds more. A Dot's **…** menu opens its **Setup** and **Pages**.
+already; the **+** next to Hearth spins up another (just give it a name). A Dot's **…** menu opens
+its **Setup** and **Pages**; a new conversation starts from the clock menu in its header.
 Follow the Setup page:
 
 1. **Container**: a new Dot starts its container at once (Scout has a **Start container**
@@ -79,17 +80,17 @@ Setup page shows what is missing.
 
 ## What is where
 
-| Surface              | What it shows                                                                                                                                        | Backed by                                                      |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Sidebar              | Search, Dots with their latest conversation; each Dot's **…** menu (Setup, Pages), Settings                                                          | this server's SQLite                                           |
-| Setup (Dot menu)     | The Dot's Space: its container, then Claude Code sign-in (link + pasted code), then GitHub                                                           | Hearth-backend, then the Space's Hearth-Core                   |
-| Pages (Dot menu)     | The Dot's Space's pages                                                                                                                              | this server's SQLite                                           |
-| Conversation         | Your messages, Claude Code's replies, one row per tool call ("Saved file ~/notes/a.md · 2.1 KB", "Ran wc -l … → 41 lines"), review cards             | the home Space's Hearth-Core `POST /api/chat`                  |
-| Review before saving | A draft with **Approve & save** / **Decline**; only approval saves the page                                                                          | CopilotKit human-in-the-loop                                   |
-| Computer: Files      | Editor-style: the container's `/workspace` as a tree (`@pierre/trees`) beside the open file, with line numbers and highlighting (Shiki, Pierre Dark) | the Dot's Hearth-Core `/api/workspace/*`                       |
-| Computer: Terminal   | A live shell in the Dot's container (xterm.js); it stays connected while the panel is open                                                           | Hearth-backend's terminal WebSocket (`docker exec`)            |
-| Computer: Activity   | Every tool call, with its outcome (succeeded, failed, denied)                                                                                        | recorded from the chat stream                                  |
-| GitHub (Setup)       | The Space's GitHub account; connect with a one-time code or a personal access token, re-check, disconnect                                            | the Space's Hearth-Core `/api/connectors/github/*` (gh inside) |
+| Surface              | What it shows                                                                                                                                                                  | Backed by                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| Sidebar              | Search, Dots with their latest conversation; each Dot's **…** menu (Setup, Pages), Settings                                                                                    | this server's SQLite                                           |
+| Setup (Dot menu)     | The Dot's Space: its container, then Claude Code sign-in (link + pasted code), then GitHub                                                                                     | Hearth-backend, then the Space's Hearth-Core                   |
+| Pages (Dot menu)     | The Dot's Space's pages                                                                                                                                                        | this server's SQLite                                           |
+| Conversation         | Your messages; Claude Code's replies, justified, each heading's section a card (code with Copy, framed tables); one row per tool call ("Ran wc -l … → 41 lines"); review cards | the home Space's Hearth-Core `POST /api/chat`                  |
+| Review before saving | A draft with **Approve & save** / **Decline**; only approval saves the page                                                                                                    | CopilotKit human-in-the-loop                                   |
+| Computer: Files      | Editor-style: the container's `/workspace` as a tree (`@pierre/trees`) beside the open file, with line numbers and highlighting (Shiki, Pierre Dark)                           | the Dot's Hearth-Core `/api/workspace/*`                       |
+| Computer: Terminal   | A live shell in the Dot's container (xterm.js); it stays connected while the panel is open                                                                                     | Hearth-backend's terminal WebSocket (`docker exec`)            |
+| Computer: Activity   | Every tool call, with its outcome (succeeded, failed, denied)                                                                                                                  | recorded from the chat stream                                  |
+| GitHub (Setup)       | The Space's GitHub account; connect with a one-time code or a personal access token, re-check, disconnect                                                                      | the Space's Hearth-Core `/api/connectors/github/*` (gh inside) |
 
 ## How a turn runs
 

@@ -327,13 +327,25 @@ it('gives each new Dot its own Space and starts its container', async () => {
     )
   ).json();
   expect(edited).toMatchObject({ spaceId: space.id, spaceIds: [space.id] });
+  // a name is all the + button sends: the instructions default, and an edit keeps them
+  const named = await (
+    await app.request('/api/dots', json({ name: 'Wren' }))
+  ).json();
+  expect(named.instructions).toBe(workspace.dots()[0].instructions);
+  expect(workspace.space(named.spaceId)?.name).toBe('Wren');
+  await app.request(
+    `/api/dots/${named.id}`,
+    json({ name: 'Wren', directory: 'dots/wren' }, 'PUT'),
+  );
+  expect(workspace.dot(named.id)?.instructions).toBe(named.instructions);
+  await platform.spaces.settled(named.spaceId);
   // access to a Space that does not exist creates nothing
   const refused = await app.request(
     '/api/dots',
     json({ name: 'Ghost', instructions: 'Nothing.', spaceIds: ['nope'] }),
   );
   expect(refused.status).toBe(400);
-  expect(workspace.spaces()).toHaveLength(before + 1);
+  expect(workspace.spaces()).toHaveLength(before + 2);
 });
 it('keeps Claude Code sign-in waiting until the container runs', async () => {
   const { app, workspace, core } = fixture({ container: false });

@@ -335,7 +335,6 @@ export function App() {
               : workspace.dots.find((item) => item.spaceId === spaceId)?.id
           }
           onSearch={setSearch}
-          onNew={() => void newConversation()}
           onDot={chooseDot}
           onCreateDot={() => setDialog({ type: 'dot' })}
           onSetup={openSetup}

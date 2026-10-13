@@ -3,10 +3,12 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { folderPath } from '../shared/computer-types.js';
 import { Platform } from './platform.js';
+import { DEFAULT_INSTRUCTIONS } from './workspace.js';
 const dotSchema = z
   .object({
     name: z.string().trim().min(1).max(40),
-    instructions: z.string().trim().min(3).max(2000),
+    /** A new Dot without them gets DEFAULT_INSTRUCTIONS; an edit without them keeps its own. */
+    instructions: z.string().trim().min(3).max(2000).optional(),
     directory: folderPath.optional(),
     spaceIds: z.array(z.string().min(1)).min(1).max(100).optional(),
     /** The Dot's home Space. A new Dot without one gets its own; an edit without one keeps it. */
@@ -31,11 +33,24 @@ export function workspaceRoutes(platform: Platform) {
   app.post('/dots', async (c) => {
     const data = dotSchema.safeParse(await c.req.json().catch(() => null));
     if (!data.success)
-      return c.json({ error: 'Provide a name and role instructions.' }, 400);
-    const { spaceId, spaceIds = [], ...dot } = data.data;
+      return c.json(
+        { error: 'Give the Dot a name (up to 40 characters).' },
+        400,
+      );
+    const {
+      spaceId,
+      spaceIds = [],
+      instructions = DEFAULT_INSTRUCTIONS,
+      ...dot
+    } = data.data;
     if (spaceId)
       return c.json(
-        platform.workspace.createDot({ ...data.data, spaceId }),
+        platform.workspace.createDot({
+          ...dot,
+          instructions,
+          spaceId,
+          ...(data.data.spaceIds ? { spaceIds } : {}),
+        }),
         201,
       );
     // Each Dot is a Space: it gets its own, and that Space's container starts now.
@@ -48,6 +63,7 @@ export function workspaceRoutes(platform: Platform) {
     return c.json(
       platform.workspace.createDot({
         ...dot,
+        instructions,
         spaceId: home,
         spaceIds: [home, ...spaceIds],
       }),

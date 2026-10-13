@@ -60,7 +60,6 @@ it('lists Dots only, and opens a Dot’s Space Setup and Pages from its menu', (
         search: '',
         activeDot: 'dot-1',
         onSearch: vi.fn(),
-        onNew: vi.fn(),
         onDot: vi.fn(),
         onCreateDot: vi.fn(),
         onSettings: vi.fn(),
@@ -83,4 +82,31 @@ it('lists Dots only, and opens a Dot’s Space Setup and Pages from its menu', (
   act(() => toggle.props.onClick());
   act(() => items()[1].props.onClick());
   expect(calls.onPages).toHaveBeenCalledWith('space-1');
+});
+
+it('spins up a new Dot from the + next to Hearth', () => {
+  const onCreateDot = vi.fn();
+  let root!: ReturnType<typeof create>;
+  act(() => {
+    root = create(
+      createElement(Sidebar, {
+        workspace,
+        open: false,
+        search: '',
+        onSearch: vi.fn(),
+        onDot: vi.fn(),
+        onCreateDot,
+        onSetup: vi.fn(),
+        onPages: vi.fn(),
+        onSettings: vi.fn(),
+      }),
+    );
+  });
+  const plus = root.root.findByProps({ 'aria-label': 'New Dot' });
+  expect(plus.props.title).toMatch(/its own container/);
+  act(() => plus.props.onClick());
+  expect(onCreateDot).toHaveBeenCalledTimes(1);
+  expect(
+    root.root.findAllByProps({ 'aria-label': 'New conversation' }),
+  ).toEqual([]);
 });

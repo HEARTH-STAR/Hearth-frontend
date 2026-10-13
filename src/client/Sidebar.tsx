@@ -116,7 +116,6 @@ export function Sidebar({
   search,
   activeDot,
   onSearch,
-  onNew,
   onDot,
   onCreateDot,
   onSetup,
@@ -128,7 +127,6 @@ export function Sidebar({
   search: string;
   activeDot?: string;
   onSearch: (value: string) => void;
-  onNew: () => void;
   onDot: (dot: Dot) => void;
   onCreateDot: () => void;
   /** Open a Space's Setup page: its container, Claude Code and GitHub. */
@@ -163,9 +161,9 @@ export function Sidebar({
         </span>
         <button
           className="icon-button"
-          aria-label="New conversation"
-          title="New conversation"
-          onClick={onNew}
+          aria-label="New Dot"
+          title="New Dot: spins up its own container"
+          onClick={onCreateDot}
         >
           <Plus size={17} />
         </button>
