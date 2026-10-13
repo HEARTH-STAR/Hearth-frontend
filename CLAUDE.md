@@ -12,7 +12,8 @@
   home to one Dot carries that Dot's name (`WorkspaceStore.nameSpacesAfterDots`, also on rename and at startup). Its
   setup is container → Claude Code sign-in → GitHub, both signed in inside the container through its Hearth-Core.
   A Dot runs in its Space (`dot.spaceId`): chat, files and permissions all go there.
-- The sidebar lists Dots only. A Dot's "…" menu (`DotMenu` in `Sidebar.tsx`) opens its Space's Setup page
+- The + next to Hearth spins up a new Dot (name only: `POST /api/dots` defaults the instructions to
+  `DEFAULT_INSTRUCTIONS` and gives it its own Space and container). The sidebar lists Dots only. A Dot's "…" menu (`DotMenu` in `Sidebar.tsx`) opens its Space's Setup page
   (`#/spaces/:id/setup`) and its Pages (`#/spaces/:id`). Keep the mascots.
 - Vite + React client (`src/client`), Hono server (`src/server`), shared types (`src/shared`).
 
@@ -39,6 +40,11 @@
   `review_space_page` is a `handoff` tool: the turn ends with the review card, the server records an open
   handoff, and the owner's answer is sent next turn wherever CopilotKit placed it in the history.
 - Claude Code tool names reach the client bare (`mcp__client__` stripped). `ToolRow.tsx` renders them.
+- Replies render in `ChatTranscript.tsx`: `reply-sections.ts` (a remark plugin) makes each section under the reply's top
+  headings (or under two or more bold-only title lines) a `.reply-card`, and any other reply one untitled card
+  (`.reply-card.whole`), so every reply is carded; `CodeCard.tsx` gives code blocks a language
+  label and Copy. The owner's messages stay plain. `REPLY_FORMAT` in `hearth-agent.ts` asks every turn for `## `
+  sections, so longer answers come out as cards in every conversation.
 
 ## Conventions
 
@@ -48,7 +54,19 @@
 - Each Dot's computer is its folder in its home Space's container (`dot.directory`, default `dots/<slug>-<id8>`).
   The Files tab (`FileTreeView.tsx`, `@pierre/trees`) and file reads go through this server
   (`/api/dots/:id/computer/*`), never from the browser to Hearth-Core.
-- Permissions (`files`, `shell`) are sent with every turn; Hearth-Core enforces them. There is no Memory feature
+- The Computer panel's Files tab is editor-style (`CodeView.tsx`, `code-view.ts`): `@pierre/trees` with the complete
+  icon set and Shiki for the code, both in Pierre Dark (`@pierre/theme`). The line between tree and code drags
+  (`FilesSplitter.tsx`, size kept per browser in `files-split.ts`). It lists the container's whole workspace
+  (`/workspace`); file paths are relative to it,
+  and tool-row links (relative to the Dot's folder) are prefixed with `dot.directory`.
+- Terminal: `TerminalView.tsx` (xterm.js) gets a one-use ticket from `POST /api/dots/:id/computer/terminal`, then
+  opens a WebSocket on the same path. `terminal.ts` handles the upgrade on the Node server (not through Hono): it runs
+  `originProblem` like every /api request, redeems the ticket, and pipes the socket to Hearth-backend's
+  `WS /api/containers/{name}/terminal`. The shell is root in the container and is not under Claude Code's policy: it is
+  the owner's own terminal. Vite's dev proxy forwards WebSockets (`ws: true`).
+- Permissions (`files`, `shell`) are sent with every turn; Hearth-Core enforces them. The panel has no switches for
+  them (removed at the owner's request): they stay as stored (default files on, shell off), and
+  `PATCH /api/dots/:id/computer/permissions` still changes them. There is no Memory feature
   (removed at the owner's request); do not bring OpenDots' memories back.
 - Server code reads configuration only through `config.ts` (`configFromEnv`).
 - GitHub and Claude Code sign-in are per Space: `github-routes.ts` (`/api/spaces/:id/github*`) and

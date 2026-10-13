@@ -1,6 +1,12 @@
 import { openPageLink } from './page-navigation';
 import { SpaceWorkspace, type SpaceSection } from './SpaceWorkspace';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
 import { Menu, Monitor, X } from 'lucide-react';
 import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
@@ -14,6 +20,11 @@ import {
 import { Mascot } from './Mascot';
 import { Chat, Composer } from './Chat';
 import { ComputerPanel } from './ComputerPanel';
+import {
+  clampComputerWidth,
+  saveComputerWidth,
+  savedComputerWidth,
+} from './computer-size';
 import { ConversationMenu } from './ConversationMenu';
 import { DotHeader } from './DotHeader';
 import { latestConversation, Sidebar } from './Sidebar';
@@ -99,6 +110,22 @@ export function App() {
     () => window.matchMedia('(min-width: 1101px)').matches,
   );
   const [openFile, setOpenFile] = useState<{ path: string; at: number }>();
+  const [computerWidth, setComputerWidth] = useState(() =>
+    clampComputerWidth(savedComputerWidth(), window.innerWidth),
+  );
+  const [computerExpanded, setComputerExpanded] = useState(false);
+  const resizeComputer = useCallback((width: number, done: boolean) => {
+    const next = clampComputerWidth(width, window.innerWidth);
+    setComputerWidth(next);
+    if (done) saveComputerWidth(next);
+  }, []);
+  // A narrower window narrows the panel too, so the conversation keeps its room.
+  useEffect(() => {
+    const fit = () =>
+      setComputerWidth((width) => clampComputerWidth(width, window.innerWidth));
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
   const [turnsFinished, setTurnsFinished] = useState(0);
   const [prompt, setPrompt] = useState('');
   const [pendingPrompt, setPendingPrompt] = useState<string>();
@@ -278,7 +305,10 @@ export function App() {
       // CopilotKit's dev Inspector advertises cloud features Hearth does not use; opt in to debug.
       enableInspector={import.meta.env.VITE_COPILOTKIT_INSPECTOR === 'true'}
     >
-      <div className={`hearth-app ${showComputer ? 'with-computer' : ''}`}>
+      <div
+        className={`hearth-app ${showComputer ? 'with-computer' : ''}`}
+        style={{ '--computer-width': `${computerWidth}px` } as CSSProperties}
+      >
         <button
           className="mobile-menu icon-button"
           aria-label="Open navigation"
@@ -305,7 +335,6 @@ export function App() {
               : workspace.dots.find((item) => item.spaceId === spaceId)?.id
           }
           onSearch={setSearch}
-          onNew={() => void newConversation()}
           onDot={chooseDot}
           onCreateDot={() => setDialog({ type: 'dot' })}
           onSetup={openSetup}
@@ -422,7 +451,14 @@ export function App() {
             dot={dot}
             openFile={openFile}
             turnsFinished={turnsFinished}
-            onClose={() => setComputerOpen(false)}
+            width={computerWidth}
+            expanded={computerExpanded}
+            onResize={resizeComputer}
+            onExpand={setComputerExpanded}
+            onClose={() => {
+              setComputerExpanded(false);
+              setComputerOpen(false);
+            }}
           />
         )}
         {dialog && (

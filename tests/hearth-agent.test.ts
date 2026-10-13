@@ -4,6 +4,7 @@ import { afterEach, expect, it } from 'vitest';
 import {
   HearthAgent,
   systemPrompt,
+  REPLY_FORMAT,
   toolSummary,
   turnMessage,
 } from '../src/server/hearth-agent.js';
@@ -140,6 +141,9 @@ it('describes the Dot and names its Spaces', () => {
   );
   expect(prompt).toContain(`Scout (id ${dot.spaceId})`);
   expect(prompt).toContain('review_space_page');
+  // every turn asks for sectioned replies, which the app shows as cards
+  expect(prompt).toContain(REPLY_FORMAT);
+  expect(REPLY_FORMAT).toContain('"## "');
   expect(
     systemPrompt({
       dot,

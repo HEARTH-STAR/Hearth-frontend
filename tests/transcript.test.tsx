@@ -56,3 +56,102 @@ it('renders user and assistant Markdown with their bubble roles', () => {
   expect(html).toContain('<strong>Done</strong>');
   expect(html).toContain('href="/#/spaces/s/pages/p"');
 });
+it('sets each section of a reply in a card, with code cards and framed tables', () => {
+  const reply = [
+    'An agent harness wraps a model.',
+    '',
+    '## The core loop',
+    '',
+    '```python',
+    'reply = model(context, tools)',
+    '```',
+    '',
+    'Most of a harness supports this loop.',
+    '',
+    '### A detail',
+    '',
+    'Still inside the first card.',
+    '',
+    '## Main components',
+    '',
+    '| Component | What it does |',
+    '| --- | --- |',
+    '| Tools | Runs the calls |',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    <ChatTranscript
+      messages={[
+        { id: 'ask', role: 'user', content: '## Not a card\n\n```\ncode\n```' },
+        { id: 'reply', role: 'assistant', content: reply },
+      ]}
+    />,
+  );
+  const reply_ = html.slice(html.indexOf('chat-bubble assistant'));
+  // the intro stays plain, before the first card
+  expect(reply_.indexOf('An agent harness')).toBeLessThan(
+    reply_.indexOf('reply-card'),
+  );
+  expect(reply_.match(/<section class="reply-card">/g)).toHaveLength(2);
+  expect(reply_).toMatch(
+    /<section class="reply-card"><h2>The core loop<\/h2>[\s\S]*Still inside the first card[\s\S]*<\/section>\s*<section class="reply-card"><h2>Main components<\/h2>/,
+  );
+  expect(reply_).toContain('<div class="code-card-head"><span>python</span>');
+  expect(reply_).toContain('aria-label="Copy code"');
+  expect(reply_).toContain('<div class="chat-table"><table>');
+  // the owner's own messages stay as they are
+  const ask = html.slice(0, html.indexOf('chat-bubble assistant'));
+  expect(ask).not.toContain('reply-card');
+  expect(ask).not.toContain('code-card');
+});
+it('sets a reply without sections in one untitled card', () => {
+  const html = renderToStaticMarkup(
+    <ChatTranscript
+      messages={[{ id: 'r', role: 'assistant', content: 'Just a sentence.' }]}
+    />,
+  );
+  expect(html).toBe(
+    '<div class="chat-bubble assistant"><section class="reply-card whole"><p>Just a sentence.</p></section></div>',
+  );
+});
+it('reads a code block’s language and text for the Copy button', async () => {
+  const { languageOf, textOf } = await import('../src/client/CodeCard');
+  const pre = {
+    type: 'element' as const,
+    tagName: 'pre',
+    properties: {},
+    children: [
+      {
+        type: 'element' as const,
+        tagName: 'code',
+        properties: { className: ['language-ts'] },
+        children: [{ type: 'text' as const, value: 'const a = 1;\n' }],
+      },
+    ],
+  };
+  expect(languageOf(pre)).toBe('ts');
+  expect(textOf(pre)).toBe('const a = 1;\n');
+  expect(languageOf({ ...pre, children: [] })).toBeNull();
+});
+
+it('turns bold title lines into cards when a reply has no headings', () => {
+  const render = (content: string) =>
+    renderToStaticMarkup(
+      <ChatTranscript messages={[{ id: 'r', role: 'assistant', content }]} />,
+    );
+  const titled = render(
+    'Two parts.\n\n**First part**\n\nOne.\n\n**Second part:**\n\nTwo.',
+  );
+  expect(titled.match(/<section class="reply-card"><h2>/g)).toHaveLength(2);
+  expect(titled).toContain('<h2>First part</h2><p>One.</p>');
+  expect(titled).toContain('<h2>Second part</h2><p>Two.</p>');
+  // one bold line is emphasis, not structure; bold inside a sentence is never a title:
+  // those replies are one untitled card
+  for (const content of [
+    '**Note**\n\nJust this.',
+    '**A** starts this.\n\n**B** starts that.\n\nEnd.',
+  ]) {
+    const html = render(content);
+    expect(html.match(/class="reply-card whole"/g)).toHaveLength(1);
+    expect(html).not.toContain('<h2>');
+  }
+});

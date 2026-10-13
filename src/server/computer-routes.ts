@@ -19,6 +19,10 @@ export function computerRoutes(computers: ComputerService) {
   app.patch('/dots/:id/computer/permissions', async (c) =>
     c.json(computers.permissions(c.req.param('id'), await c.req.json())),
   );
+  /** A ticket for the terminal's WebSocket (same path, ``?ticket=``), served by ``terminal.ts``. */
+  app.post('/dots/:id/computer/terminal', async (c) =>
+    c.json({ ticket: await computers.terminalTicket(c.req.param('id')) }),
+  );
   app.get('/dots/:id/computer/files', async (c) =>
     c.json(await computers.files(c.req.param('id'), c.req.raw.signal)),
   );

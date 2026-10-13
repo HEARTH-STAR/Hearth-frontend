@@ -16,6 +16,9 @@ export interface TranscriptEntry {
   text: string;
   createdAt: number;
 }
+/** What a Dot is told when nobody gave it other instructions (every Dot made from the + button). */
+export const DEFAULT_INSTRUCTIONS =
+  'Be thoughtful, practical, and concise. Read what is in your folder before answering, keep notes as Markdown files, and show drafts for review before saving them to a Space.';
 /** Lowercase letters, digits and dashes: safe for a folder and a container name. */
 export function slug(value: string, fallback = 'dot') {
   const result = value
@@ -56,8 +59,7 @@ export class WorkspaceStore {
       this.createDot({
         spaceId: space.id,
         name: 'Scout',
-        instructions:
-          'Be thoughtful, practical, and concise. Read what is in your folder before answering, keep notes as Markdown files, and show drafts for review before saving them to a Space.',
+        instructions: DEFAULT_INSTRUCTIONS,
       });
     }
     this.nameSpacesAfterDots();

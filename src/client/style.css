@@ -199,7 +199,7 @@ code {
   background: var(--canvas);
 }
 .hearth-app.with-computer {
-  grid-template-columns: 248px minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: 248px minmax(0, 1fr) var(--computer-width, 360px);
 }
 .main {
   min-width: 0;
@@ -608,6 +608,67 @@ code {
 .chat-bubble.assistant {
   color: #3a3c44;
 }
+/* Replies read as set text: paragraphs and list items justified, hyphenated where it helps. */
+.chat-bubble.assistant p,
+.chat-bubble.assistant li {
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
+}
+.chat-bubble h1,
+.chat-bubble h2,
+.chat-bubble h3,
+.chat-bubble h4 {
+  margin: 1em 0 0.45em;
+  line-height: 1.3;
+  text-align: left;
+}
+.chat-bubble > :first-child {
+  margin-top: 0;
+}
+/* Reply cards: each section under a reply's top headings (reply-sections.ts). */
+.reply-card {
+  margin: 0.9em 0;
+  padding: 14px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 2px #2f31380a,
+    0 8px 24px #2f313808;
+}
+.reply-card + .reply-card {
+  margin-top: 12px;
+}
+.reply-card > :last-child {
+  margin-bottom: 0;
+}
+.reply-card > h1:first-child,
+.reply-card > h2:first-child,
+.reply-card > h3:first-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+  font-weight: 600;
+}
+.reply-card > h1:first-child::before,
+.reply-card > h2:first-child::before,
+.reply-card > h3:first-child::before {
+  content: '';
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+.reply-card h3,
+.reply-card h4 {
+  font-size: 14px;
+}
 .chat-bubble pre {
   overflow: auto;
   padding: 10px 12px;
@@ -615,19 +676,88 @@ code {
   background: #eeedea;
   font-size: 12.5px;
 }
+/* A code block in a reply: its language and a Copy button above the code. */
+.code-card {
+  margin: 0.5em 0 0.8em;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #f6f5f2;
+}
+.code-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #efeeea;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.code-card-head button {
+  gap: 5px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+.code-card-head button:hover:not(:disabled) {
+  background: #e4e2dc;
+}
+.chat-bubble .code-card pre {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 0;
+  background: transparent;
+  line-height: 1.55;
+  scrollbar-width: thin;
+  scrollbar-color: #c9c7c1 transparent;
+}
 .chat-bubble ul,
 .chat-bubble ol {
   margin: 0.2em 0 0.6em;
   padding-left: 1.4em;
 }
+.chat-table {
+  max-width: 100%;
+  margin: 0.4em 0 0.9em;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
 .chat-bubble table {
+  width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  line-height: 1.5;
 }
 .chat-bubble th,
 .chat-bubble td {
-  border: 1px solid var(--line);
-  padding: 4px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 7px 12px;
+  text-align: left;
+  vertical-align: top;
+  /* Break between words only, never inside one ("Componen-t"). */
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+}
+.chat-bubble th {
+  background: #f3f2ef;
+  font-weight: 600;
+}
+.chat-bubble th + th,
+.chat-bubble td + td {
+  border-left: 1px solid var(--line);
+}
+.chat-bubble tbody tr:last-child td {
+  border-bottom: 0;
 }
 .thinking {
   display: flex;
@@ -929,12 +1059,68 @@ code {
 
 /* Computer panel */
 .computer {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--side);
   border-left: 1px solid var(--line);
+  container-type: inline-size;
+}
+.computer.expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  width: auto;
+  border-left: 0;
+  box-shadow: none;
+}
+/* The left edge: drag to resize. */
+.computer-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 5;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.computer-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.computer-resize:hover::after,
+.computer-resize:focus-visible::after,
+body.resizing-computer .computer-resize::after {
+  background: var(--teal);
+}
+.computer-resize:focus-visible {
+  outline: none;
+}
+body.resizing-computer {
+  cursor: col-resize;
+  user-select: none;
+}
+body.resizing-cols {
+  cursor: col-resize;
+  user-select: none;
+}
+body.resizing-rows {
+  cursor: row-resize;
+  user-select: none;
+}
+.computer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 .computer-head {
   display: flex;
@@ -1006,122 +1192,248 @@ code {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 0 16px;
+  padding: 0 16px 16px;
 }
 .computer-body > section {
   flex: 1;
   min-height: 0;
 }
-.computer-files {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.files-tree,
-.file-view {
+/* theme: fixed .code-workspace */
+/* The Files tab, editor-style: the tree and the open file, in Pierre Dark (code-view.ts). Stacked
+   in a narrow panel, side by side once it is wide. */
+.code-workspace {
+  /* The tree's share; dragging the splitter sets these inline. */
+  --tree-width: min(300px, 34%);
+  --tree-height: 42%;
+  display: grid;
+  grid-template-rows:
+    minmax(100px, min(var(--tree-height), calc(100% - 126px)))
+    6px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid #262626;
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--code-bg);
+  color: var(--code-fg);
 }
-.files-tree {
-  flex: 1 1 45%;
-  min-height: 170px;
+.code-sidebar {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--code-sidebar);
 }
-.file-tree {
+/* Between the tree and the code: drag to resize. */
+.code-splitter {
+  position: relative;
+  background: var(--code-sidebar);
+  border-bottom: 1px solid #262626;
+  cursor: row-resize;
+  touch-action: none;
+}
+.code-splitter::after {
+  content: '';
+  position: absolute;
+  inset: 2px 0;
+  background: transparent;
+  transition: background 0.15s;
+}
+.code-splitter:hover::after,
+.code-splitter:focus-visible::after,
+body.resizing-rows .code-splitter::after,
+body.resizing-cols .code-splitter::after {
+  background: #009fff;
+}
+.code-splitter:focus-visible {
+  outline: none;
+}
+.code-sidebar .file-tree {
   display: block;
   flex: 1;
   min-height: 0;
   height: 100%;
-  --trees-bg-override: #ffffff;
-  --trees-fg-override: #3d3f47;
-  --trees-fg-muted-override: #868892;
-  --trees-selected-bg-override: #eceefa;
-  --trees-border-color-override: #e8e6e1;
-  --trees-accent-override: #6f7fd0;
   --trees-font-size-override: 12.5px;
   --trees-font-family-override: inherit;
 }
-.file-view {
-  flex: 1 1 55%;
+.code-tree-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--code-muted);
+}
+.code-tree-head small {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.code-editor {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--code-bg);
 }
-.file-view-head {
-  display: flex;
+.code-editor.empty {
   align-items: center;
-  gap: 8px;
-  padding: 5px 6px 5px 12px;
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-  color: #55575f;
+  justify-content: center;
 }
-.file-view-head span {
-  flex: 1;
-  min-width: 0;
+.code-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 10px 0;
+  background: var(--code-tabs);
+  border-bottom: 1px solid #262626;
+}
+.code-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 75%;
+  margin-bottom: -1px;
+  padding: 6px 6px 7px 10px;
+  border: 1px solid #262626;
+  border-bottom-color: var(--code-bg);
+  border-radius: 8px 8px 0 0;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-size: 12.5px;
+}
+.code-tab span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-view-head small {
-  color: var(--muted);
+.code-tab .icon-button {
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--code-muted);
 }
-.file-view pre {
+.code-tab .icon-button:hover:not(:disabled) {
+  background: #262626;
+  color: var(--code-fg);
+}
+.code-size {
+  margin: 0 0 8px auto;
+  font-size: 11px;
+  color: var(--code-muted);
+}
+.code-body {
   flex: 1;
-  margin: 0;
-  padding: 10px 12px;
+  min-height: 0;
   overflow: auto;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.55;
-  color: #3d3f47;
 }
+.code-body:focus-visible {
+  outline: none;
+}
+.code-lines pre.shiki {
+  margin: 0;
+  padding: 10px 0 16px;
+  background: transparent !important;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  counter-reset: line;
+}
+.code-lines code {
+  display: block;
+  min-width: max-content;
+  padding-right: 16px;
+}
+.code-lines .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3.4em;
+  margin-right: 1.4em;
+  text-align: right;
+  color: var(--code-line-number);
+  user-select: none;
+}
+.code-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--code-muted);
+  font-size: 12.5px;
+}
+.code-empty.failed {
+  color: #ff6762;
+}
+@container (min-width: 640px) {
+  .code-workspace {
+    grid-template-rows: none;
+    grid-template-columns:
+      minmax(160px, min(var(--tree-width), calc(100% - 226px)))
+      6px minmax(0, 1fr);
+  }
+  .code-splitter {
+    border-bottom: 0;
+    border-right: 1px solid #262626;
+    cursor: col-resize;
+  }
+  .code-splitter::after {
+    inset: 0 2px;
+  }
+}
+/* theme: end */
 .computer-empty {
   margin: 0;
   padding: 18px 14px;
   color: var(--muted);
   font-size: 12.5px;
 }
-.computer-hint {
-  margin: 0;
-  padding: 6px 12px;
-  font-size: 11px;
-  color: var(--muted);
-  border-top: 1px solid var(--line);
-}
-/* theme: fixed .computer-terminal */
-.computer-terminal {
-  padding: 12px 14px;
+/* theme: fixed .computer-shell */
+/* The terminal: a shell in the Dot's container (xterm.js). */
+.computer-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 4px 6px 12px;
   border-radius: 12px;
   background: #1f2126;
-  color: #d9dbe0;
-  font-family: var(--mono);
+}
+.computer-shell[hidden] {
+  display: none;
+}
+.computer-shell-screen {
+  flex: 1;
+  min-height: 0;
+}
+.computer-shell-screen .xterm-viewport {
+  background: #1f2126 !important;
+}
+.computer-shell-status {
+  position: absolute;
+  inset: auto 12px 12px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: #2b2e35;
+  color: #c9ccd3;
   font-size: 12px;
-  overflow: auto;
 }
-.terminal-command {
+.computer-shell-status button {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-color: #3a3e47;
+  background: #33373f;
   color: #e6e7ea;
-  overflow-wrap: anywhere;
+  font-size: 12px;
 }
-.terminal-command span {
-  color: #7fd1b9;
-}
-.computer-terminal pre {
-  margin: 4px 0 14px;
-  color: #a9adb8;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.terminal-entry.denied .terminal-command,
-.terminal-entry.failed .terminal-command {
-  color: #f2a596;
-}
-.terminal-empty {
-  margin: 0;
-  color: #a9adb8;
+.computer-shell-status button:hover:not(:disabled) {
+  background: #3a3e47;
 }
 /* theme: end */
 .activity-list {
@@ -1173,32 +1485,6 @@ code {
 .activity-list time {
   font-size: 11px;
   color: var(--muted);
-}
-.computer-perms {
-  padding: 12px 16px 16px;
-}
-.computer-perms > span {
-  font-size: 12px;
-  color: var(--muted);
-}
-.computer-perms > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-.chip {
-  padding: 4px 10px;
-  border: 1px dashed #d6d4ce;
-  border-radius: 7px;
-  background: transparent;
-  font-size: 12px;
-  color: #9a9ca4;
-}
-.chip[aria-pressed='true'] {
-  border: 1px solid #e4e2dc;
-  background: #ebe9e4;
-  color: #3d3f47;
 }
 
 /* A Space's health in the sidebar: ready, on its way, or waiting for setup */
@@ -1715,7 +2001,7 @@ code {
     position: fixed;
     inset: 0 0 0 auto;
     z-index: 40;
-    width: min(380px, 100%);
+    width: min(var(--computer-width, 380px), 100%);
     box-shadow: -12px 0 40px #2f31381f;
   }
 }

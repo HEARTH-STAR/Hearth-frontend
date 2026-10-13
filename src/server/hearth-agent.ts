@@ -93,6 +93,12 @@ export function previewOf(text: string) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+/**
+ * How replies should be laid out. The app shows each section under a reply's top headings as a
+ * card (client/reply-sections.ts), so structured answers read as cards in every conversation.
+ */
+export const REPLY_FORMAT =
+  'Format replies in Markdown. The Hearth app shows each "## " section as a card. For anything longer than a few sentences, open with one or two plain sentences that answer directly, then give each part its own "## " heading with a short title, keeping each section focused. Use lists, tables and fenced code blocks (with a language) inside sections where they help. A short answer needs no headings.';
 export function systemPrompt(input: {
   dot: Dot;
   settings: Settings;
@@ -104,6 +110,7 @@ export function systemPrompt(input: {
   return [
     `You are ${dot.name}: an assistant (a "Dot") in ${settings.name}'s Hearth workspace.`,
     `Role instructions from the owner: ${dot.instructions}`,
+    REPLY_FORMAT,
     `Spaces hold the owner's pages. You may use: ${spaces.map((space) => `${space.name} (id ${space.id})`).join(', ') || 'none'}. Save new pages to ${spaces.find((space) => space.id === dot.spaceId)?.name ?? 'your default Space'} (id ${dot.spaceId}) unless asked otherwise.`,
     review
       ? 'When the owner wants to see a draft before it is saved, call review_space_page once and end your turn; it saves the page only if they approve. After approval, link the page with Markdown using the url from their answer.'
