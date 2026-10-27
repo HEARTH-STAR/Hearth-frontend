@@ -16,6 +16,8 @@ import {
   GITHUB_URL,
   Landing,
   PROBLEMS,
+  REVEAL,
+  staggerDelay,
   REQUIREMENTS,
   SAFETY,
   STEPS,
@@ -26,6 +28,7 @@ import {
   SECTION_ORDER,
 } from '../src/landing/LandingNav';
 import { nextTheme } from '../src/landing/ThemeToggle';
+import { PHRASES, typingTimeline } from '../src/landing/TypedPhrase';
 
 const html = renderToStaticMarkup(<Landing />);
 
@@ -37,9 +40,13 @@ it('opens the app from every "Get started" and "Open Hearth" button', () => {
 });
 
 it('leads with the API-change problem for developers', () => {
-  expect(html).toContain(
-    '<h1>Stop finding out about API changes in production.</h1>',
+  // Screen readers get the headline whole; the typed copy beside it is hidden from them.
+  const h1 = html.slice(html.indexOf('<h1>'), html.indexOf('</h1>') + 5);
+  expect(h1.replace(/<[^>]+>/g, '')).toBe(
+    'Stop finding out about API changesAPI changes in production.',
   );
+  expect(h1).toContain('<span class="sr-only">API changes</span>');
+  expect(h1).toContain('class="typed-phrase " aria-hidden="true">API changes');
   expect(html).toContain('For developers who depend on APIs');
   for (const item of PROBLEMS) expect(html).toContain(item.title);
 });
@@ -170,4 +177,43 @@ it('shows one Dot per vendor, each with a mascot that exists', () => {
     expect(html).toContain(`Looks after <code>${dot.vendor}</code>`);
     expect(existsSync(`public/dots/${dot.mascot}.png`)).toBe(true);
   }
+});
+
+it('types each phrase out, holds it, erases it, then moves on', () => {
+  const steps = typingTimeline();
+  const first = PHRASES[0];
+  // Types the first phrase a letter at a time, then holds it whole.
+  expect(steps.slice(0, first.length).map(([shown]) => shown)).toEqual(
+    [...first].map((_, index) => index + 1),
+  );
+  const held = steps[first.length - 1];
+  expect(held[0]).toBe(first.length);
+  expect(held[2]).toBeGreaterThan(1000);
+  // Every phrase appears, in order, and each is fully erased before the next.
+  expect([...new Set(steps.map(([, which]) => which))]).toEqual(
+    PHRASES.map((_, index) => index),
+  );
+  for (let which = 0; which < PHRASES.length; which++) {
+    const own = steps.filter(([, phrase]) => phrase === which);
+    expect(Math.max(...own.map(([shown]) => shown))).toBe(
+      PHRASES[which].length,
+    );
+    expect(own.at(-1)![0]).toBe(0);
+  }
+  // One full loop stays watchable.
+  const total = steps.reduce((sum, [, , wait]) => sum + wait, 0);
+  expect(total).toBeGreaterThan(8000);
+  expect(total).toBeLessThan(20000);
+});
+
+it('reveals real parts of the page, in staggered order', () => {
+  // Every kind of element the reveal looks for exists on the page.
+  const classOf = (selector: string) =>
+    selector.trim().split(' ')[0].replace('.', '');
+  for (const selector of REVEAL.split(','))
+    expect(html).toContain(`class="${classOf(selector)}`);
+  expect(staggerDelay(0)).toBe('0ms');
+  expect(staggerDelay(2)).toBe('160ms');
+  // A long row starts its stagger over rather than waiting ever longer.
+  expect(staggerDelay(6)).toBe('0ms');
 });

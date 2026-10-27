@@ -16,8 +16,9 @@ import {
   UserCheck,
   Wrench,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { HeroDemo } from './HeroDemo';
+import { TypedPhrase } from './TypedPhrase';
 import { BrandMark, LandingNav } from './LandingNav';
 import { TestsVisual, UsageVisual } from './FeatureVisuals';
 // The public landing page at /welcome/, for developers whose code depends on vendors'
@@ -208,7 +209,65 @@ function Cards({ items, className }: { items: Item[]; className: string }) {
   );
 }
 
+/** What fades up into view as the page scrolls to it. */
+export const REVEAL = [
+  '.landing-section h2',
+  '.section-lede',
+  '.landing-cards article',
+  '.landing-steps li',
+  '.landing-dots li',
+  '.landing-bento article',
+  '.landing-requirements li',
+  '.requirements-note',
+  '.landing-cta',
+].join(', ');
+
+/** Delay for the nth item in a row of cards, so they arrive one after another. */
+export const staggerDelay = (position: number) => `${(position % 6) * 80}ms`;
+
+/**
+ * Hide each REVEAL element until it scrolls into view, then let it fade up. Nothing is
+ * hidden before this runs, so the page reads fine without scripts or with reduced motion.
+ */
+function useScrollReveal() {
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (typeof IntersectionObserver === 'undefined') return;
+    const items = [...document.querySelectorAll<HTMLElement>(REVEAL)];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const item = entry.target as HTMLElement;
+          // Once in, hand the element back to its own styles (hover lifts and all).
+          item.addEventListener(
+            'transitionend',
+            () => {
+              item.classList.remove('reveal', 'revealed');
+              item.style.transitionDelay = '';
+            },
+            { once: true },
+          );
+          item.classList.add('revealed');
+          observer.unobserve(item);
+        }
+      },
+      { rootMargin: '0px 0px -8% 0px' },
+    );
+    for (const item of items) {
+      const siblings = item.parentElement
+        ? [...item.parentElement.children]
+        : [item];
+      item.style.transitionDelay = staggerDelay(siblings.indexOf(item));
+      item.classList.add('reveal');
+      observer.observe(item);
+    }
+    return () => observer.disconnect();
+  }, []);
+}
+
 export function Landing() {
+  useScrollReveal();
   return (
     <div className="landing">
       <LandingNav appUrl={APP_URL} />
@@ -222,7 +281,9 @@ export function Landing() {
               ))}
             </div>
             <p className="hero-eyebrow">For developers who depend on APIs</p>
-            <h1>Stop finding out about API changes in production.</h1>
+            <h1>
+              Stop finding out about <TypedPhrase /> in production.
+            </h1>
             <p className="hero-lede">
               When a vendor’s API or SDK changes, a Hearth agent finds every
               place your code uses it, fixes it in an isolated container, proves
