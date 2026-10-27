@@ -25,6 +25,7 @@ import {
 import {
   activeSection,
   NAV_LINKS,
+  readingProgress,
   SECTION_ORDER,
 } from '../src/landing/LandingNav';
 import { nextTheme } from '../src/landing/ThemeToggle';
@@ -216,4 +217,32 @@ it('reveals real parts of the page, in staggered order', () => {
   expect(staggerDelay(2)).toBe('160ms');
   // A long row starts its stagger over rather than waiting ever longer.
   expect(staggerDelay(6)).toBe('0ms');
+});
+
+it('fills the reading line from 0 to 1 as the page scrolls', () => {
+  expect(readingProgress(0, 5000, 800)).toBe(0);
+  expect(readingProgress(2100, 5000, 800)).toBe(0.5);
+  expect(readingProgress(4200, 5000, 800)).toBe(1);
+  // Overscroll and short pages stay in range.
+  expect(readingProgress(9999, 5000, 800)).toBe(1);
+  expect(readingProgress(-40, 5000, 800)).toBe(0);
+  expect(readingProgress(0, 600, 800)).toBe(0);
+});
+
+it('gives the top bar a skip link, GitHub, and a closed phone menu', () => {
+  const header = html.slice(0, html.indexOf('</header>'));
+  expect(header).toContain(
+    '<a class="skip-link" href="#top">Skip to content</a>',
+  );
+  expect(header).toContain('aria-label="Hearth on GitHub"');
+  expect(header).toContain('aria-label="Open menu"');
+  expect(header).toContain('aria-expanded="false"');
+  expect(header).toContain('aria-controls="landing-menu"');
+  // The menu holds every section link too, hidden until opened.
+  const menu = header.slice(header.indexOf('id="landing-menu"'));
+  expect(menu).toContain('hidden=""');
+  for (const link of NAV_LINKS) expect(menu).toContain(`href="#${link.id}"`);
+  expect(menu).toContain('Hearth on GitHub');
+  // The reading line starts empty.
+  expect(header).toContain('transform:scaleX(0)');
 });

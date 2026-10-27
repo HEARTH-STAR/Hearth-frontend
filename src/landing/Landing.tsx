@@ -270,7 +270,7 @@ export function Landing() {
   useScrollReveal();
   return (
     <div className="landing">
-      <LandingNav appUrl={APP_URL} />
+      <LandingNav appUrl={APP_URL} githubUrl={GITHUB_URL} />
 
       <main id="top">
         <section className="landing-hero">

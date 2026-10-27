@@ -68,13 +68,17 @@ p {
   z-index: 20;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 14px 0;
+  padding: 16px 0;
+  transition: padding 0.2s ease;
+}
+/* Slimmer once the page moves, so it takes less room while you read. */
+.landing-nav.scrolled {
+  padding: 10px 0;
 }
 .landing-nav::before {
   background: #f7f6f3eb;
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid #e8e6e100;
   transition:
     border-color 0.2s ease,
@@ -84,35 +88,103 @@ p {
   border-bottom-color: #e8e6e1;
   box-shadow: 0 6px 20px -16px #2f313866;
 }
-.landing-nav nav {
+.landing-links {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 2px;
+  margin-left: auto;
   font-size: 14px;
   color: #55575f;
 }
-.landing-nav nav a:not(.landing-button) {
-  position: relative;
-  padding: 4px 0;
-  transition: color 0.15s ease;
+.landing-nav nav a {
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
-.landing-nav nav a:not(.landing-button):hover {
+.landing-nav nav a:hover {
   color: #2f3138;
+  background: #efede8;
 }
-/* The section being read: darker text with a short line under it. */
+/* The section being read: a soft pill. */
 .landing-nav nav a.active {
-  color: #2f3138;
+  color: #4a3fb0;
+  background: #eceefa;
   font-weight: 550;
 }
-.landing-nav nav a.active::after {
-  content: '';
+.landing-nav nav a:focus-visible,
+.landing-nav-actions a:focus-visible,
+.menu-toggle:focus-visible,
+.landing-brand:focus-visible {
+  outline: 2px solid #5fa8a0;
+  outline-offset: 2px;
+}
+.landing-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+.nav-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #55575f;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.nav-icon:hover {
+  background: #efede8;
+  color: #2f3138;
+}
+/* The phone menu's button and panel: hidden on wider screens. */
+.menu-toggle {
+  display: none;
+}
+.landing-menu {
+  display: none;
+}
+/* Reading progress: a thin line along the bar's bottom edge, the page's full width. */
+.nav-progress {
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: 100vw;
+  height: 2px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.nav-progress span {
+  display: block;
+  height: 100%;
+  background: #5fa8a0;
+  transform-origin: left;
+  transition: transform 0.1s linear;
+}
+/* Keyboard users can jump straight past the bar. */
+.skip-link {
   position: absolute;
   left: 0;
-  right: 0;
-  bottom: -2px;
-  height: 2px;
-  border-radius: 2px;
-  background: #5fa8a0;
+  top: -60px;
+  z-index: 30;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: #2f3138;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 550;
+}
+.skip-link:focus {
+  top: 10px;
 }
 .landing-brand {
   display: inline-flex;
@@ -873,9 +945,6 @@ p {
   .landing {
     padding: 0 16px;
   }
-  .landing-nav nav a:not(.landing-button) {
-    display: none;
-  }
   .landing-hero h1 {
     font-size: 34px;
     min-height: 4.8em;
@@ -914,9 +983,51 @@ p {
     margin-left: 0;
   }
 }
-@media (max-width: 1000px) {
-  .landing-nav nav {
-    gap: 16px;
+/* Narrow screens: the section links (and GitHub) move into the menu. */
+@media (max-width: 860px) {
+  .landing-links,
+  .landing-nav-actions .nav-github {
+    display: none;
+  }
+  .landing-nav-actions {
+    margin-left: auto;
+  }
+  .menu-toggle {
+    display: inline-grid;
+  }
+  .landing-menu:not([hidden]) {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    display: grid;
+    gap: 2px;
+    padding: 8px;
+    border: 1px solid #e8e6e1;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 18px 40px -18px #2f313859;
+    animation: menu-drop 0.18s ease-out;
+  }
+  .landing-menu a {
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 15px;
+  }
+  .landing-menu .menu-github {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+    border-top: 1px solid #e8e6e1;
+    border-radius: 0 0 10px 10px;
+    color: #55575f;
+  }
+}
+@keyframes menu-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -928,7 +1039,10 @@ p {
   .landing-dots li,
   .landing-dots img,
   .hero-mascots img,
+  .landing-nav,
   .landing-nav::before,
+  .nav-progress span,
+  .landing-menu,
   .hero-copy > *,
   .landing-hero .landing-preview,
   .typed-phrase::after {
