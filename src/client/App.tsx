@@ -8,7 +8,7 @@ import {
   type CSSProperties,
 } from 'react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
-import { Menu, Monitor, X } from 'lucide-react';
+import { Menu, Monitor, SquarePen, X } from 'lucide-react';
 import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
 import {
@@ -19,6 +19,7 @@ import {
 } from './poll-notice';
 import { Mascot } from './Mascot';
 import { Chat, Composer } from './Chat';
+import { ChatStart, composerPlaceholder, focusBlank } from './ChatStart';
 import { ComputerPanel } from './ComputerPanel';
 import {
   clampComputerWidth,
@@ -128,6 +129,7 @@ export function App() {
   }, []);
   const [turnsFinished, setTurnsFinished] = useState(0);
   const [prompt, setPrompt] = useState('');
+  const promptInput = useRef<HTMLTextAreaElement>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
@@ -297,6 +299,21 @@ export function App() {
       onNew={() => void newConversation()}
     />
   );
+  // Starting over is one click from any conversation, not hidden in the history menu.
+  const newConversationButton = (
+    <button
+      className="icon-button"
+      aria-label="New conversation"
+      title="New conversation"
+      onClick={() => void newConversation()}
+    >
+      <SquarePen size={17} />
+    </button>
+  );
+  const pickStarter = (text: string) => {
+    setPrompt(text);
+    requestAnimationFrame(() => focusBlank(promptInput.current, text));
+  };
   const showComputer = view === 'chat' && computerOpen;
   return (
     <CopilotKitProvider
@@ -393,7 +410,12 @@ export function App() {
               onConsumed={() => setPendingPrompt(undefined)}
               paused={paused}
               computerOpen={computerOpen}
-              headerActions={conversationMenu}
+              headerActions={
+                <>
+                  {newConversationButton}
+                  {conversationMenu}
+                </>
+              }
               onSaved={refresh}
               onComputer={() => setComputerOpen(!computerOpen)}
               onOpenFile={showFile}
@@ -404,6 +426,7 @@ export function App() {
               <DotHeader
                 dot={dot}
                 online={online}
+                title="New conversation"
                 state={paused ? 'paused' : 'idle'}
               >
                 {conversationMenu}
@@ -417,26 +440,27 @@ export function App() {
                 </button>
               </DotHeader>
               <div className="chat-scroll">
-                <div className="chat-column new-conversation">
-                  <Mascot
-                    identity={dot.id}
-                    name={dot.name}
-                    state={paused ? 'paused' : 'idle'}
+                <div className="chat-column">
+                  <ChatStart
+                    dot={dot}
+                    space={home}
+                    online={online}
+                    paused={paused}
+                    onPick={pickStarter}
                   />
-                  <h2>{dot.name}</h2>
                 </div>
               </div>
               <div className="chat-dock">
                 <Composer
+                  inputRef={promptInput}
                   value={prompt}
                   onChange={setPrompt}
-                  placeholder={
-                    paused
-                      ? 'All Dots are paused'
-                      : online
-                        ? `Ask ${dot.name} anything`
-                        : `Finish ${dot.name}’s setup to start`
-                  }
+                  placeholder={composerPlaceholder({
+                    name: dot.name,
+                    paused,
+                    online,
+                    started: false,
+                  })}
                   disabled={paused || !online || busy}
                   onSubmit={() => void newConversation(prompt)}
                   onAttach={() => setComputerOpen(true)}

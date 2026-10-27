@@ -3,7 +3,7 @@ import { pageReviewSchema, pageReviewTool } from '../shared/page-review';
 import { contextualMessage, type PageContext } from './page-context';
 import { api } from './api';
 import type { Page } from '../server/pages';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import {
   CopilotChatToolCallsView,
   useRenderTool,
@@ -11,12 +11,26 @@ import {
   useAgent,
   useCopilotKit,
 } from '@copilotkit/react-core/v2';
-import { ArrowUp, FilePlus, Monitor, Plus, Square } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  FilePlus,
+  Monitor,
+  Plus,
+  Square,
+} from 'lucide-react';
 import { ToolRow, type ToolRenderProps } from './ToolRow';
 import { ChatTranscript } from './ChatTranscript';
 import type { Conversation, Dot, Space } from '../shared/types';
 import { DotHeader } from './DotHeader';
 import { shouldSubmitComposerOnKeyDown } from './chat-composer';
+import { useStickToBottom } from './chat-scroll';
+import {
+  ChatStart,
+  composerPlaceholder,
+  focusBlank,
+  SetupCard,
+} from './ChatStart';
 /** Matches the server's ``ACTIVITY_EVENT``: what the agent is doing right now. */
 const ACTIVITY_EVENT = 'hearth.activity';
 export function Chat({
@@ -89,7 +103,14 @@ export function Chat({
   const [running, setRunning] = useState(false);
   const [activity, setActivity] = useState('');
   const sent = useRef(false);
-  const bottom = useRef<HTMLDivElement>(null);
+  const { scroller, content, away, jump } = useStickToBottom();
+  const input = useRef<HTMLTextAreaElement>(null);
+  const space = spaces.find((item) => item.id === dot.spaceId);
+  /** A starter fills the composer, with its first [blank] selected for typing over. */
+  const pickStarter = (text: string) => {
+    setDraft(text);
+    requestAnimationFrame(() => focusBlank(input.current, text));
+  };
   const finished = useRef(onTurnFinished);
   finished.current = onTurnFinished;
   // Connecting replays the conversation, including errors of earlier turns; only new ones show.
@@ -150,6 +171,8 @@ export function Chat({
       content: contextualMessage(text, pageContext),
     });
     setDraft('');
+    // Your own message brings you back to the end, following the reply.
+    jump();
     try {
       await copilotkit.runAgent({ agent });
       onSaved();
@@ -170,9 +193,6 @@ export function Chat({
       void send(initialPrompt);
     }
   }, [loaded, contextReady, paused, initialPrompt]);
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
-  }, [agent.messages.length, running, activity]);
   useHumanInTheLoop(
     {
       name: pageReviewTool.name,
@@ -216,6 +236,7 @@ export function Chat({
       <DotHeader
         dot={dot}
         online={online}
+        title={thread.title}
         state={paused ? 'paused' : working ? 'working' : 'idle'}
       >
         {headerActions}
@@ -263,13 +284,16 @@ export function Chat({
           </a>
         </div>
       )}
-      <div className="chat-scroll">
-        <div className="chat-column">
+      <div className="chat-scroll" ref={scroller}>
+        <div className="chat-column" ref={content}>
           {!visible.length && (
-            <div className="chat-welcome">
-              <h2>What should {dot.name} work on?</h2>
-              <p>{dot.instructions}</p>
-            </div>
+            <ChatStart
+              dot={dot}
+              space={space}
+              online={online}
+              paused={paused}
+              onPick={pickStarter}
+            />
           )}
           <ChatTranscript
             messages={visible}
@@ -290,10 +314,17 @@ export function Chat({
               </span>
             </div>
           )}
-          <div ref={bottom} />
         </div>
       </div>
       <div className="chat-dock">
+        {away && visible.length > 0 && (
+          <button type="button" className="jump-latest" onClick={jump}>
+            <ArrowDown size={14} aria-hidden="true" /> Jump to latest
+          </button>
+        )}
+        {!online && !paused && visible.length > 0 && (
+          <SetupCard dot={dot} space={space} compact />
+        )}
         {contextError && (
           <div className="chat-error" role="alert">
             {contextError}
@@ -319,10 +350,16 @@ export function Chat({
           </div>
         )}
         <Composer
+          inputRef={input}
           value={draft}
           onChange={setDraft}
-          placeholder={paused ? 'All Dots are paused' : 'Ask anything'}
-          disabled={!loaded || !contextReady || paused}
+          placeholder={composerPlaceholder({
+            name: dot.name,
+            paused,
+            online,
+            started: visible.length > 0,
+          })}
+          disabled={!loaded || !contextReady || paused || !online}
           running={working}
           onStop={() => copilotkit.stopAgent({ agent })}
           onSubmit={() => void send(draft)}
@@ -341,6 +378,7 @@ export function Composer({
   running = false,
   onStop,
   onAttach,
+  inputRef,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -350,6 +388,7 @@ export function Composer({
   running?: boolean;
   onStop?: () => void;
   onAttach?: () => void;
+  inputRef?: Ref<HTMLTextAreaElement>;
 }) {
   return (
     <form
@@ -371,6 +410,7 @@ export function Composer({
         </button>
       )}
       <textarea
+        ref={inputRef}
         aria-label="Message"
         placeholder={placeholder}
         rows={1}

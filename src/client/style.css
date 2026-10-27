@@ -497,6 +497,58 @@ code {
   font-size: 14.5px;
   font-weight: 600;
 }
+/* Under the name: where the Dot stands, then the conversation's title. */
+.dot-header-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.dot-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.dot-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.dot-status.ready {
+  color: #2d7a5f;
+}
+.dot-status.working {
+  color: #9a5b14;
+}
+.dot-status.working::before {
+  animation: status-pulse 1s ease-in-out infinite;
+}
+.dot-status.setup {
+  color: #b0532f;
+}
+.dot-status.paused {
+  color: var(--muted);
+}
+.dot-header-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+@keyframes status-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot-status.working::before {
+    animation: none;
+  }
+}
 .dot-header-actions {
   margin-left: auto;
   display: flex;
@@ -568,18 +620,168 @@ code {
   flex-direction: column;
   gap: 14px;
 }
-.chat-welcome {
+/* An empty conversation: starting points, or the setup still to do (ChatStart.tsx). */
+.chat-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-  margin: 8vh auto 0;
-  max-width: 440px;
+  padding-top: 6vh;
 }
-.chat-welcome h2 {
+.chat-start .mascot {
+  width: 84px;
+  height: 84px;
+}
+.chat-start h2 {
   font-size: 22px;
-  margin-bottom: 8px;
+  margin: 8px 0 6px;
 }
-.chat-welcome p {
+.chat-start > p {
+  margin: 0 0 20px;
   color: var(--muted);
   font-size: 13px;
+}
+.starter-prompts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.starter-prompts button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-content: stretch;
+  gap: 2px 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #ffffff;
+  text-align: left;
+}
+.starter-prompts button:hover:not(:disabled) {
+  background: #ffffff;
+  border-color: #cfd3ee;
+  box-shadow: 0 6px 18px -12px #2f313840;
+}
+.starter-icon {
+  grid-row: span 2;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--lavender);
+  color: #5b4fc0;
+}
+.starter-prompts strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.starter-text {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.setup-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #ffffff;
+  text-align: left;
+}
+.setup-card h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.setup-card > p {
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.setup-card ol {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+}
+.setup-card li {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.setup-card li > span:last-child {
+  justify-self: end;
+  color: var(--muted);
+}
+.setup-step-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--muted);
+}
+.setup-card li.done .setup-step-icon {
+  background: #e3f3ec;
+  color: #2d7a5f;
+}
+.setup-card li.working .setup-step-icon {
+  background: #fbefdc;
+  color: #9a5b14;
+}
+.setup-card a.button,
+.setup-strip a.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 550;
+}
+.setup-card a.button.primary {
+  width: 100%;
+  border-color: #2f3138;
+  background: #2f3138;
+  color: #ffffff;
+}
+.setup-card a.button.primary:hover {
+  background: #1f2126;
+}
+/* A conversation with messages whose Dot is not ready: one line above the composer. */
+.setup-strip {
+  max-width: 640px;
+  margin: 0 auto 8px;
+  padding: 8px 8px 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 10px;
+  background: #fbefdc;
+  color: #7a4a10;
+  font-size: 12.5px;
+}
+.setup-strip a.button {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .starter-prompts {
+    grid-template-columns: 1fr;
+  }
 }
 .chat-bubble {
   font-size: 14px;
@@ -969,6 +1171,7 @@ code {
 
 /* Composer */
 .chat-dock {
+  position: relative;
   padding: 8px 24px 18px;
 }
 .composer {
@@ -1043,18 +1246,22 @@ code {
   padding: 4px 9px;
   font-size: 12px;
 }
-.new-conversation {
-  align-items: center;
-  text-align: center;
-  padding-top: 8vh;
+/* Scrolled up while the conversation grows: a way back to the newest line. */
+.jump-latest {
+  position: absolute;
+  top: -40px;
+  left: 50%;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 6px 18px -8px #2f313859;
+  font-size: 12.5px;
+  font-weight: 550;
 }
-.new-conversation .mascot {
-  width: 92px;
-  height: 92px;
-}
-.new-conversation h2 {
-  font-size: 22px;
-  margin: 6px 0 0;
+.jump-latest:active:not(:disabled) {
+  transform: translateX(-50%) translateY(1px);
 }
 
 /* Computer panel */

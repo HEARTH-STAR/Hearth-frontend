@@ -8,6 +8,8 @@ playwright-report/
 test-results/
 RESEARCH.md
 .DS_Store
+venv
+
 
 data/
 *.sqlite
