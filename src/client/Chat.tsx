@@ -3,7 +3,17 @@ import { pageReviewSchema, pageReviewTool } from '../shared/page-review';
 import { contextualMessage, type PageContext } from './page-context';
 import { api } from './api';
 import type { Page } from '../server/pages';
-import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from 'react';
+import type { WorkspaceListing } from '../shared/computer-types';
+import { dotFiles, insertReference } from './file-reference';
+import { FilePicker } from './FilePicker';
 import {
   CopilotChatToolCallsView,
   useRenderTool,
@@ -105,6 +115,7 @@ export function Chat({
   const sent = useRef(false);
   const { scroller, content, away, jump } = useStickToBottom();
   const input = useRef<HTMLTextAreaElement>(null);
+  const loadFiles = useDotFiles(dot);
   const space = spaces.find((item) => item.id === dot.spaceId);
   /** A starter fills the composer, with its first [blank] selected for typing over. */
   const pickStarter = (text: string) => {
@@ -363,12 +374,29 @@ export function Chat({
           running={working}
           onStop={() => copilotkit.stopAgent({ agent })}
           onSubmit={() => void send(draft)}
-          onAttach={onComputer}
+          name={dot.name}
+          loadFiles={loadFiles}
+          onOpenFiles={onComputer}
         />
       </div>
     </div>
   );
 }
+/** The Dot's files for the composer's "+", relative to its folder. Stable per Dot. */
+export function useDotFiles(dot: Dot | undefined) {
+  const id = dot?.id;
+  const directory = dot?.directory;
+  return useCallback(async () => {
+    if (!id || !directory) return [];
+    return dotFiles(
+      await api<WorkspaceListing>(
+        `/dots/${encodeURIComponent(id)}/computer/files`,
+      ),
+      directory,
+    );
+  }, [id, directory]);
+}
+
 export function Composer({
   value,
   onChange,
@@ -377,7 +405,9 @@ export function Composer({
   disabled,
   running = false,
   onStop,
-  onAttach,
+  name = 'Dot',
+  loadFiles,
+  onOpenFiles,
   inputRef,
 }: {
   value: string;
@@ -387,9 +417,43 @@ export function Composer({
   disabled: boolean;
   running?: boolean;
   onStop?: () => void;
-  onAttach?: () => void;
+  /** The Dot's name, for the file picker. */
+  name?: string;
+  /** With it, "+" picks a file to reference as @path. */
+  loadFiles?: () => Promise<string[]>;
+  /** Opens the Computer panel's Files tab (from the picker, or "+" without loadFiles). */
+  onOpenFiles?: () => void;
   inputRef?: Ref<HTMLTextAreaElement>;
 }) {
+  const own = useRef<HTMLTextAreaElement | null>(null);
+  const setInput = (element: HTMLTextAreaElement | null) => {
+    own.current = element;
+    if (typeof inputRef === 'function') inputRef(element);
+    else if (inputRef)
+      (inputRef as { current: HTMLTextAreaElement | null }).current = element;
+  };
+  const [picking, setPicking] = useState(false);
+  const closePicker = useCallback(() => {
+    setPicking(false);
+    own.current?.focus();
+  }, []);
+  /** Put @path where the cursor was (or over the selection), then type on after it. */
+  const pick = (path: string) => {
+    const input = own.current;
+    const next = insertReference(
+      value,
+      input?.selectionStart ?? value.length,
+      input?.selectionEnd ?? value.length,
+      path,
+    );
+    onChange(next.value);
+    setPicking(false);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(next.cursor, next.cursor);
+    });
+  };
+  const off = disabled && !running;
   return (
     <form
       className="composer"
@@ -398,19 +462,30 @@ export function Composer({
         if (value.trim() && !disabled && !running) onSubmit();
       }}
     >
-      {onAttach && (
+      {picking && loadFiles && (
+        <FilePicker
+          name={name}
+          load={loadFiles}
+          onPick={pick}
+          onClose={closePicker}
+          onOpenFiles={onOpenFiles}
+        />
+      )}
+      {(loadFiles || onOpenFiles) && (
         <button
           type="button"
-          className="composer-plus"
-          aria-label="Open the computer's files"
-          title="Files"
-          onClick={onAttach}
+          className={`composer-plus ${picking ? 'active' : ''}`}
+          aria-label={loadFiles ? 'Reference a file' : 'Open the Files panel'}
+          aria-expanded={loadFiles ? picking : undefined}
+          title={loadFiles ? 'Reference a file' : 'Files'}
+          disabled={off}
+          onClick={() => (loadFiles ? setPicking(!picking) : onOpenFiles?.())}
         >
           <Plus size={18} />
         </button>
       )}
       <textarea
-        ref={inputRef}
+        ref={setInput}
         aria-label="Message"
         placeholder={placeholder}
         rows={1}

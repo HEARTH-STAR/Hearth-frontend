@@ -8,6 +8,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { Mascot } from './Mascot';
+import { WELCOME_URL } from './first-visit';
 import { STAGE_LABEL, working } from './space-stage';
 import type { Conversation, Dot, Space, WorkspaceState } from '../shared/types';
 /** One word for a Space's state: ready, on its way, or waiting for setup. */
@@ -150,7 +151,8 @@ export function Sidebar({
   return (
     <aside id="workspace-sidebar" className={`sidebar ${open ? 'open' : ''}`}>
       <div className="brand-row">
-        <span className="brand">
+        {/* The logo goes to the landing page; its "Open Hearth" comes back here. */}
+        <a className="brand" href={WELCOME_URL} title="About Hearth">
           <span className="brand-mark" aria-hidden="true">
             <i />
             <i />
@@ -158,7 +160,7 @@ export function Sidebar({
             <i />
           </span>
           Hearth
-        </span>
+        </a>
         <button
           className="icon-button"
           aria-label="New Dot"

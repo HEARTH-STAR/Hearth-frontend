@@ -110,3 +110,26 @@ it('spins up a new Dot from the + next to Hearth', () => {
     root.root.findAllByProps({ 'aria-label': 'New conversation' }),
   ).toEqual([]);
 });
+
+it('takes the Hearth logo to the landing page', () => {
+  let root!: ReturnType<typeof create>;
+  act(() => {
+    root = create(
+      createElement(Sidebar, {
+        workspace,
+        open: false,
+        search: '',
+        onSearch: vi.fn(),
+        onDot: vi.fn(),
+        onCreateDot: vi.fn(),
+        onSetup: vi.fn(),
+        onPages: vi.fn(),
+        onSettings: vi.fn(),
+      }),
+    );
+  });
+  const brand = root.root.findByProps({ className: 'brand' });
+  expect(brand.type).toBe('a');
+  expect(brand.props.href).toBe('/welcome/');
+  expect(text(brand)).toBe('Hearth');
+});

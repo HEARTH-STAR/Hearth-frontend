@@ -18,7 +18,7 @@ import {
   type Notices,
 } from './poll-notice';
 import { Mascot } from './Mascot';
-import { Chat, Composer } from './Chat';
+import { Chat, Composer, useDotFiles } from './Chat';
 import { ChatStart, composerPlaceholder, focusBlank } from './ChatStart';
 import { ComputerPanel } from './ComputerPanel';
 import {
@@ -193,6 +193,7 @@ export function App() {
   // A Dot runs in its home Space's container, with the Claude Code signed in there.
   const home = workspace?.spaces.find((space) => space.id === dot?.spaceId);
   const online = home?.stage === 'ready' && home.claude !== false;
+  const loadFiles = useDotFiles(dot);
   const chooseDot = (next: Dot) => {
     if (!setView('chat')) return;
     setSelectedDot(next.id);
@@ -463,7 +464,9 @@ export function App() {
                   })}
                   disabled={paused || !online || busy}
                   onSubmit={() => void newConversation(prompt)}
-                  onAttach={() => setComputerOpen(true)}
+                  name={dot.name}
+                  loadFiles={loadFiles}
+                  onOpenFiles={() => setComputerOpen(true)}
                 />
               </div>
             </div>
