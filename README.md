@@ -75,8 +75,9 @@ Follow the Setup page:
    - **Cursor**: **Sign in to Cursor** and approve on cursor.com; the page finishes on its own.
    - **Antigravity**: **Sign in to Google**, approve, and paste the code Google shows.
 
-   Hearth-Core runs the agent's own login inside the container, so the login lives there. The Space
-   image must include that agent's CLI (Cursor's `cursor-agent`, Antigravity's `agy`).
+   Hearth-Core runs the agent's own login inside the container, so the login lives there. A
+   Cursor or Antigravity Space downloads that agent's CLI on its first start (Hearth-backend's
+   `install-agent-cli`, pinned by version and checksum), so that start takes a little longer.
 
 3. **GitHub** (optional): a one-time code or a personal access token, for the gh CLI inside the
    container.
