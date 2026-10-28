@@ -8,7 +8,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { Mascot } from './Mascot';
-import { WELCOME_URL } from './first-visit';
+import { WELCOME_URL } from './landing-link';
 import { STAGE_LABEL, working } from './space-stage';
 import type { Conversation, Dot, Space, WorkspaceState } from '../shared/types';
 /** One word for a Space's state: ready, on its way, or waiting for setup. */
