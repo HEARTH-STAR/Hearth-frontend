@@ -11,15 +11,16 @@ import { Mascot } from './Mascot';
 import { WELCOME_URL } from './landing-link';
 import { STAGE_LABEL, working } from './space-stage';
 import type { Conversation, Dot, Space, WorkspaceState } from '../shared/types';
+import { agentOf } from '../shared/agents';
 /** One word for a Space's state: ready, on its way, or waiting for setup. */
 export function spaceHealth(space: Space) {
   if (space.stage === 'ready')
-    return space.claude === false ? 'setup' : 'ready';
+    return space.signedIn === false ? 'setup' : 'ready';
   return working(space.stage) ? 'working' : 'setup';
 }
 function spaceLabel(space: Space) {
-  if (space.stage === 'ready' && space.claude === false)
-    return 'Sign in to Claude';
+  if (space.stage === 'ready' && space.signedIn === false)
+    return `Sign in to ${agentOf(space).account}`;
   return STAGE_LABEL[space.stage];
 }
 /** ``11:42 AM`` today, ``Mon`` this week, ``Oct 3`` before that. */
@@ -130,7 +131,7 @@ export function Sidebar({
   onSearch: (value: string) => void;
   onDot: (dot: Dot) => void;
   onCreateDot: () => void;
-  /** Open a Space's Setup page: its container, Claude Code and GitHub. */
+  /** Open a Space's Setup page: its container, its agent and GitHub. */
   onSetup: (spaceId: string) => void;
   /** Open a Space's Pages. */
   onPages: (spaceId: string) => void;

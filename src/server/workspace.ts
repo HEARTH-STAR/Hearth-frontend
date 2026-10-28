@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Conversation, Dot, StoredSpace } from '../shared/types.js';
+import { DEFAULT_AGENT, isAgentId, type AgentId } from '../shared/agents.js';
 export type DotInput = Pick<Dot, 'name' | 'instructions'> & {
   spaceId: string;
   spaceIds?: string[];
@@ -44,6 +45,7 @@ export class WorkspaceStore {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS spaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS space_containers(spaceId TEXT PRIMARY KEY, name TEXT NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS space_agents(spaceId TEXT PRIMARY KEY, agent TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS dots(id TEXT PRIMARY KEY, spaceId TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, instructions TEXT NOT NULL, directory TEXT NOT NULL, memoryAllowed INTEGER NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS dot_spaces(dotId TEXT NOT NULL, spaceId TEXT NOT NULL, PRIMARY KEY(dotId, spaceId));
       CREATE TABLE IF NOT EXISTS thread_bindings(id TEXT PRIMARY KEY, dotId TEXT NOT NULL, ownerId TEXT NOT NULL, title TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, preview TEXT NOT NULL DEFAULT '');
@@ -92,19 +94,25 @@ export class WorkspaceStore {
   spaces(): StoredSpace[] {
     return this.db
       .prepare(
-        'SELECT spaces.*, (SELECT COUNT(*) FROM pages WHERE pages.spaceId=spaces.id) AS pageCount, space_containers.name AS container FROM spaces LEFT JOIN space_containers ON space_containers.spaceId=spaces.id ORDER BY spaces.createdAt',
+        'SELECT spaces.*, (SELECT COUNT(*) FROM pages WHERE pages.spaceId=spaces.id) AS pageCount, space_containers.name AS container, space_agents.agent AS agent FROM spaces LEFT JOIN space_containers ON space_containers.spaceId=spaces.id LEFT JOIN space_agents ON space_agents.spaceId=spaces.id ORDER BY spaces.createdAt',
       )
       .all()
       .map((row) => ({
         ...row,
         pageCount: Number(row.pageCount),
         container: row.container === null ? null : String(row.container),
+        // Spaces made before agents could be picked have no row: they run Claude Code.
+        agent: isAgentId(row.agent) ? row.agent : DEFAULT_AGENT,
       })) as unknown as StoredSpace[];
   }
   space(id: string) {
     return this.spaces().find((space) => space.id === id);
   }
-  createSpace(name: string, description: string): StoredSpace {
+  createSpace(
+    name: string,
+    description: string,
+    agent: AgentId = DEFAULT_AGENT,
+  ): StoredSpace {
     const space = {
       id: randomUUID(),
       name,
@@ -112,10 +120,16 @@ export class WorkspaceStore {
       createdAt: Date.now(),
       pageCount: 0,
       container: null,
+      agent,
     };
-    this.db
-      .prepare('INSERT INTO spaces VALUES (?, ?, ?, ?)')
-      .run(space.id, name, description, space.createdAt);
+    this.transaction(() => {
+      this.db
+        .prepare('INSERT INTO spaces VALUES (?, ?, ?, ?)')
+        .run(space.id, name, description, space.createdAt);
+      this.db
+        .prepare('INSERT INTO space_agents VALUES (?, ?)')
+        .run(space.id, agent);
+    });
     return space;
   }
   /** Records the Docker name of the Space's container. */

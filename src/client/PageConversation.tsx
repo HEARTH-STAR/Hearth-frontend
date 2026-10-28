@@ -27,9 +27,9 @@ export function PageConversation({
   );
   const [dotId, setDotId] = useState('');
   const dot = dots.find((dot) => dot.id === dotId) ?? dots[0];
-  // The Dot runs in its home Space's container, with the Claude Code signed in there.
+  // The Dot runs in its home Space's container, with that Space's agent signed in there.
   const home = workspace.spaces.find((space) => space.id === dot?.spaceId);
-  const online = home?.stage === 'ready' && home.claude !== false;
+  const online = home?.stage === 'ready' && home.signedIn !== false;
   const [thread, setThread] = useState<Conversation>();
   const [draft, setDraft] = useState('');
   const [pending, setPending] = useState<string>();

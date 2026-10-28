@@ -1,3 +1,4 @@
+import type { AgentId } from './agents.js';
 export interface Settings {
   /** The owner's name, which Dots use for the workspace (set in Settings). */
   name: string;
@@ -6,7 +7,7 @@ export interface Settings {
 export interface State {
   settings: Settings;
 }
-/** A Space as stored. Each Space runs in its own container, where its Hearth-Core and Claude Code live. */
+/** A Space as stored. Each Space runs in its own container, where its Hearth-Core and its agent live. */
 export interface StoredSpace {
   id: string;
   name: string;
@@ -15,6 +16,8 @@ export interface StoredSpace {
   pageCount: number;
   /** The Space's container (its Docker name), once one was spun up. */
   container: string | null;
+  /** The agent its container runs (Hearth-Core's ``AGENT_NAME``), chosen when its Dot was made. */
+  agent: AgentId;
 }
 /**
  * Where a Space's container is: ``none`` before the first start, ``creating`` while Hearth-backend
@@ -32,8 +35,8 @@ export type SpaceStage =
   | 'unknown';
 export interface Space extends StoredSpace {
   stage: SpaceStage;
-  /** Whether Claude Code is signed in inside the container; null until the container answers. */
-  claude: boolean | null;
+  /** Whether the Space's agent is signed in inside the container; null until the container answers. */
+  signedIn: boolean | null;
 }
 export interface Dot {
   id: string;
@@ -70,10 +73,10 @@ export interface SetupStatus {
   /** What stops Spaces from starting; empty when Hearth-backend and its Docker answer. */
   missing: string[];
 }
-/** Claude Code inside a Space's container: the account it is signed in to, never a credential. */
-export interface ClaudeStatus {
+/** The Space's agent inside its container: the account it is signed in to, never a credential. */
+export interface AgentStatus {
   connected: boolean;
-  /** ``claude.ai`` for a Claude subscription login, ``api_key`` for a key. */
+  /** How it is signed in, e.g. ``claude.ai`` for a Claude subscription or ``api_key`` for a key. */
   method: string | null;
   email: string | null;
   organization: string | null;
@@ -82,19 +85,21 @@ export interface ClaudeStatus {
   loginSupported: boolean;
   error?: string;
 }
-export interface ClaudeLogin {
+export interface AgentLogin {
   sessionId: string;
-  /** The claude.com page where the owner approves; it then shows a code to paste back. */
+  /** Where the owner approves (claude.com, cursor.com, Google); Claude and Google then show a code to paste back. */
   authUrl: string;
   expiresIn: number;
+  /** The agent was already signed in, so there is nothing to approve. */
+  connected?: boolean;
 }
-export interface ClaudeLoginState {
+export interface AgentLoginState {
   status: 'pending' | 'connected' | 'invalid_code' | 'failed' | 'cancelled';
   error?: string;
   /** The account, once connected. */
-  claude?: ClaudeStatus;
+  agent?: AgentStatus;
 }
-/** One Space's setup: its container, then Claude Code, then GitHub, all inside the container. */
+/** One Space's setup: its container, then its agent, then GitHub, all inside the container. */
 export interface SpaceSetup {
   stage: SpaceStage;
   container: string | null;
@@ -103,8 +108,8 @@ export interface SpaceSetup {
   /** Where this server reaches the Space's Hearth-Core. */
   coreUrl: string | null;
   error?: string;
-  /** Null until Hearth-Core in the container answers. */
-  claude: ClaudeStatus | null;
+  /** The Space's agent sign-in; null until Hearth-Core in the container answers. */
+  agent: AgentStatus | null;
   github: GitHubStatus | null;
 }
 /** The Space's GitHub account, held by the gh CLI inside its container. */

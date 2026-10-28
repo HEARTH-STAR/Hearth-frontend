@@ -90,7 +90,7 @@ export function App() {
   const openPage = (space: string, page?: string) => {
     openPageLink(`#/spaces/${space}${page ? `/pages/${page}` : ''}`);
   };
-  /** Each Dot is a Space; its Setup page holds the container, Claude Code and GitHub. */
+  /** Each Dot is a Space; its Setup page holds the container, its agent and GitHub. */
   const openSetup = (space: string) => openPageLink(`#/spaces/${space}/setup`);
   const [notices, setNotices] = useState<Notices>({
     refresh: '',
@@ -190,9 +190,9 @@ export function App() {
   const thread = workspace?.conversations.find(
     (item) => item.id === selectedThread && item.dotId === dot?.id,
   );
-  // A Dot runs in its home Space's container, with the Claude Code signed in there.
+  // A Dot runs in its home Space's container, with that Space's agent signed in there.
   const home = workspace?.spaces.find((space) => space.id === dot?.spaceId);
-  const online = home?.stage === 'ready' && home.claude !== false;
+  const online = home?.stage === 'ready' && home.signedIn !== false;
   const loadFiles = useDotFiles(dot);
   const chooseDot = (next: Dot) => {
     if (!setView('chat')) return;

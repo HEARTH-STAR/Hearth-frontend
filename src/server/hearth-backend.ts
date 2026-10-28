@@ -65,11 +65,22 @@ export class HearthBackend {
       error?: string;
     };
   }
-  /** Builds or pulls the template's image on first use, so this can take minutes. */
-  async spinUp(name: string, template?: string): Promise<BackendContainer> {
+  /**
+   * Builds or pulls the template's image on first use, so this can take minutes. ``agent`` is set in the
+   * container (the ``space`` template offers Hearth-Core's agents); Hearth-backend refuses one it does not offer.
+   */
+  async spinUp(
+    name: string,
+    template?: string,
+    agent?: string,
+  ): Promise<BackendContainer> {
     return (await this.request('/api/containers', {
       method: 'POST',
-      body: JSON.stringify({ name, ...(template ? { template } : {}) }),
+      body: JSON.stringify({
+        name,
+        ...(template ? { template } : {}),
+        ...(agent ? { agent } : {}),
+      }),
     })) as BackendContainer;
   }
   /** One Hearth container with its published ports; 404 when Docker has no such container. */

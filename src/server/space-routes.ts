@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { ClaudeLogin, ClaudeLoginState } from '../shared/types.js';
-import { claudeStatus } from './connections.js';
+import type { AgentLogin, AgentLoginState } from '../shared/types.js';
+import { agentStatus } from './connections.js';
 import { spaceFailure, type SpaceService } from './space-service.js';
 
 const session = z
@@ -15,8 +15,8 @@ const code = z
   .strict();
 /**
  * Spaces and their setup: creating one spins up its container; the container's Hearth-Core then
- * signs Claude Code in (``claude auth login``, through its claude_code adapter). The pasted code
- * passes through once and is never stored or echoed here.
+ * signs the Space's agent in (Claude Code, Cursor or Antigravity, through that agent's adapter).
+ * A pasted code passes through once and is never stored or echoed here.
  */
 export function spaceRoutes(spaces: SpaceService) {
   const app = new Hono();
@@ -52,16 +52,31 @@ export function spaceRoutes(spaces: SpaceService) {
     spaces.start(id);
     return c.json(await spaces.setup(id), 202);
   });
-  app.get('/spaces/:id/claude', async (c) =>
-    c.json(
-      claudeStatus(await (await spaces.core(c.req.param('id'))).claudeStatus()),
-    ),
-  );
-  app.post('/spaces/:id/claude/login', async (c) => {
-    const login = await (
-      await spaces.core(c.req.param('id'))
-    ).claudeLoginStart();
-    const body: ClaudeLogin = {
+  /** The Space's Hearth-Core and the agent it runs. */
+  const agentCore = async (id: string) => ({
+    agent: spaces.space(id).agent,
+    core: await spaces.core(id),
+  });
+  app.get('/spaces/:id/agent', async (c) => {
+    const { agent, core } = await agentCore(c.req.param('id'));
+    return c.json(agentStatus(await core.agentStatus(agent)));
+  });
+  app.post('/spaces/:id/agent/login', async (c) => {
+    const id = c.req.param('id');
+    const { agent, core } = await agentCore(id);
+    const login = await core.agentLoginStart(agent);
+    if (!login.auth_url || !login.session_id) {
+      // Already signed in: Cursor and Antigravity say so instead of starting a sign-in.
+      spaces.agentChanged(id);
+      const body: AgentLogin = {
+        sessionId: '',
+        authUrl: '',
+        expiresIn: 0,
+        connected: true,
+      };
+      return c.json(body);
+    }
+    const body: AgentLogin = {
       sessionId: login.session_id,
       authUrl: login.auth_url,
       expiresIn: login.expires_in,
@@ -70,40 +85,47 @@ export function spaceRoutes(spaces: SpaceService) {
   });
   const outcome = async (
     id: string,
-    raw: { status: ClaudeLoginState['status']; error?: string },
-  ): Promise<ClaudeLoginState> => {
+    raw: { status: AgentLoginState['status']; error?: string },
+  ): Promise<AgentLoginState> => {
     if (raw.status !== 'connected')
       return { status: raw.status, ...(raw.error ? { error: raw.error } : {}) };
-    spaces.claudeChanged(id);
+    spaces.agentChanged(id);
     return {
       status: 'connected',
-      claude: (await spaces.claudeStatus(id, true)) ?? undefined,
+      agent: (await spaces.agentStatus(id, true)) ?? undefined,
     };
   };
-  app.post('/spaces/:id/claude/login/code', async (c) => {
+  app.post('/spaces/:id/agent/login/code', async (c) => {
     const id = c.req.param('id');
     const body = code.parse(await c.req.json());
-    const core = await spaces.core(id);
+    const { agent, core } = await agentCore(id);
     return c.json(
-      await outcome(id, await core.claudeLoginCode(body.sessionId, body.code)),
+      await outcome(
+        id,
+        await core.agentLoginCode(agent, body.sessionId, body.code),
+      ),
     );
   });
-  app.post('/spaces/:id/claude/login/poll', async (c) => {
+  app.post('/spaces/:id/agent/login/poll', async (c) => {
     const id = c.req.param('id');
     const { sessionId } = session.parse(await c.req.json());
-    const core = await spaces.core(id);
-    return c.json(await outcome(id, await core.claudeLoginPoll(sessionId)));
+    const { agent, core } = await agentCore(id);
+    return c.json(
+      await outcome(id, await core.agentLoginPoll(agent, sessionId)),
+    );
   });
-  app.post('/spaces/:id/claude/login/cancel', async (c) => {
+  app.post('/spaces/:id/agent/login/cancel', async (c) => {
     const { sessionId } = session.parse(await c.req.json());
-    await (await spaces.core(c.req.param('id'))).claudeLoginCancel(sessionId);
+    const { agent, core } = await agentCore(c.req.param('id'));
+    await core.agentLoginCancel(agent, sessionId);
     return c.json({ ok: true });
   });
-  app.post('/spaces/:id/claude/logout', async (c) => {
+  app.post('/spaces/:id/agent/logout', async (c) => {
     const id = c.req.param('id');
-    const raw = await (await spaces.core(id)).claudeLogout();
-    spaces.claudeChanged(id);
-    return c.json(claudeStatus(raw));
+    const { agent, core } = await agentCore(id);
+    const raw = await core.agentLogout(agent);
+    spaces.agentChanged(id);
+    return c.json(agentStatus(raw));
   });
   return app;
 }

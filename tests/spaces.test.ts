@@ -84,7 +84,7 @@ it('creates a Space with its own container, then reaches the Hearth-Core inside'
     (await (await app.request('/api/workspace')).json()).spaces.find(
       (item: { id: string }) => item.id === space.id,
     );
-  expect(await listed()).toMatchObject({ stage: 'creating', claude: null });
+  expect(await listed()).toMatchObject({ stage: 'creating', signedIn: null });
   expect(
     backend.calls.find((call) => call.path === '/api/containers')?.body,
   ).toEqual({ name: `design-lab-${space.id.slice(0, 8)}`, template: 'space' });
@@ -98,10 +98,10 @@ it('creates a Space with its own container, then reaches the Hearth-Core inside'
     container: `hearth-container-design-lab-${space.id.slice(0, 8)}`,
     status: 'running',
     coreUrl: 'http://127.0.0.1:50001',
-    claude: { connected: true, email: 'owner@example.com' },
+    agent: { connected: true, email: 'owner@example.com' },
     github: null,
   });
-  expect(await listed()).toMatchObject({ stage: 'ready', claude: true });
+  expect(await listed()).toMatchObject({ stage: 'ready', signedIn: true });
   expect(cores).toContain('http://127.0.0.1:50001');
 });
 it('reports a failed start plainly and starts again on request', async () => {
@@ -125,7 +125,7 @@ it('reports a failed start plainly and starts again on request', async () => {
   expect(failed).toMatchObject({
     stage: 'failed',
     error: 'Docker is not running. Start Docker Desktop, then try again.',
-    claude: null,
+    agent: null,
   });
   dockerUp = true;
   const again = await app.request(
@@ -231,7 +231,7 @@ it('signs Claude Code in inside the Space through its Hearth-Core', async () => 
       },
     },
   });
-  const base = `/api/spaces/${workspace.spaces()[0].id}/claude`;
+  const base = `/api/spaces/${workspace.spaces()[0].id}/agent`;
   expect(await (await app.request(base)).json()).toEqual({
     connected: false,
     method: null,
@@ -241,7 +241,7 @@ it('signs Claude Code in inside the Space through its Hearth-Core', async () => 
     loginSupported: true,
   });
   expect(
-    (await (await app.request('/api/workspace')).json()).spaces[0].claude,
+    (await (await app.request('/api/workspace')).json()).spaces[0].signedIn,
   ).toBe(false);
   const login = await (await app.request(`${base}/login`, json({}))).json();
   expect(login).toEqual({
@@ -260,7 +260,7 @@ it('signs Claude Code in inside the Space through its Hearth-Core', async () => 
   });
   expect(await (await send('  good#state  ')).json()).toMatchObject({
     status: 'connected',
-    claude: {
+    agent: {
       connected: true,
       email: 'owner@example.com',
       subscription: 'max',
@@ -268,7 +268,7 @@ it('signs Claude Code in inside the Space through its Hearth-Core', async () => 
   });
   // the sign-in shows at once: the cached status was dropped
   expect(
-    (await (await app.request('/api/workspace')).json()).spaces[0].claude,
+    (await (await app.request('/api/workspace')).json()).spaces[0].signedIn,
   ).toBe(true);
   // the code went to Hearth-Core once and is in no other request
   expect(
@@ -351,7 +351,7 @@ it('keeps Claude Code sign-in waiting until the container runs', async () => {
   const { app, workspace, core } = fixture({ container: false });
   const space = workspace.spaces()[0];
   const response = await app.request(
-    `/api/spaces/${space.id}/claude/login`,
+    `/api/spaces/${space.id}/agent/login`,
     json({}),
   );
   expect(response.status).toBe(409);
@@ -363,8 +363,135 @@ it('keeps Claude Code sign-in waiting until the container runs', async () => {
     container: null,
     status: null,
     coreUrl: null,
-    claude: null,
+    agent: null,
     github: null,
   });
   expect(core.calls).toHaveLength(0);
+});
+it('gives a Dot the agent it picked, and signs that agent in through its own connector', async () => {
+  let approved = false;
+  const fake = docker();
+  const { app, backend, core, platform, workspace } = fixture({
+    backend: fake.routes,
+    core: {
+      'GET /api/connectors/cursor/status': () =>
+        Response.json(
+          approved
+            ? {
+                status: 'connected',
+                method: 'login',
+                email: 'owner@example.com',
+                login_supported: true,
+              }
+            : { status: 'needs_auth', login_supported: true },
+        ),
+      'POST /api/connectors/cursor/login/start': () =>
+        Response.json({
+          session_id: 'cafe0123456789ab',
+          auth_url: 'https://cursor.com/loginDeepControl?uuid=u&mode=login',
+          expires_in: 600,
+        }),
+      'POST /api/connectors/cursor/login/poll': () => {
+        const status = approved ? 'connected' : 'pending';
+        approved = true; // the owner approves between two polls
+        return Response.json({ status, session_id: 'cafe0123456789ab' });
+      },
+    },
+  });
+  const dot = await (
+    await app.request('/api/dots', json({ name: 'Cora', agent: 'cursor' }))
+  ).json();
+  const space = workspace.space(dot.spaceId)!;
+  expect(space.agent).toBe('cursor');
+  expect(
+    backend.calls.find((call) => call.path === '/api/containers')?.body,
+  ).toEqual({
+    name: `cora-${space.id.slice(0, 8)}`,
+    template: 'space',
+    agent: 'cursor',
+  });
+  await platform.spaces.settled(space.id);
+  const base = `/api/spaces/${space.id}/agent`;
+  expect(await (await app.request(base)).json()).toMatchObject({
+    connected: false,
+    loginSupported: true,
+  });
+  // Cursor's sign-in has no code: the link, then polls until the CLI finishes
+  expect(await (await app.request(`${base}/login`, json({}))).json()).toEqual({
+    sessionId: 'cafe0123456789ab',
+    authUrl: 'https://cursor.com/loginDeepControl?uuid=u&mode=login',
+    expiresIn: 600,
+  });
+  const poll = () =>
+    app.request(`${base}/login/poll`, json({ sessionId: 'cafe0123456789ab' }));
+  expect(await (await poll()).json()).toEqual({ status: 'pending' });
+  expect(await (await poll()).json()).toMatchObject({
+    status: 'connected',
+    agent: { connected: true, email: 'owner@example.com' },
+  });
+  expect(
+    (await (await app.request('/api/workspace')).json()).spaces.find(
+      (item: { id: string }) => item.id === space.id,
+    ),
+  ).toMatchObject({ agent: 'cursor', signedIn: true });
+  // the Space's own agent answered (every Space shares the fixture's one fake Hearth-Core)
+  expect(
+    core.calls.filter((call) => call.path.startsWith('/api/connectors/cursor/'))
+      .length,
+  ).toBeGreaterThanOrEqual(4);
+});
+it('reports an agent that was already signed in instead of a sign-in link', async () => {
+  const fake = docker();
+  const { app, platform, workspace } = fixture({
+    backend: fake.routes,
+    core: {
+      'POST /api/connectors/antigravity/login/start': () =>
+        Response.json({
+          session_id: null,
+          auth_url: null,
+          expires_in: 0,
+          status: 'connected',
+        }),
+    },
+  });
+  const dot = await (
+    await app.request('/api/dots', json({ name: 'Gale', agent: 'antigravity' }))
+  ).json();
+  await platform.spaces.settled(dot.spaceId);
+  expect(workspace.space(dot.spaceId)?.agent).toBe('antigravity');
+  expect(
+    await (
+      await app.request(`/api/spaces/${dot.spaceId}/agent/login`, json({}))
+    ).json(),
+  ).toEqual({ sessionId: '', authUrl: '', expiresIn: 0, connected: true });
+});
+it('fixes a Dot’s agent when it is made, and refuses unknown ones', async () => {
+  const fake = docker();
+  const { app, backend, workspace } = fixture({ backend: fake.routes });
+  const home = workspace.spaces()[0];
+  // Spaces made before agents could be picked, and Dots made without one, run Claude Code
+  expect(home.agent).toBe('claude_code');
+  for (const body of [
+    { name: 'Nope', agent: 'opencode' },
+    { name: 'Nope', agent: 'cursor', spaceId: home.id },
+  ])
+    expect((await app.request('/api/dots', json(body))).status).toBe(400);
+  const dot = workspace.dots()[0];
+  expect(
+    (
+      await app.request(
+        `/api/dots/${dot.id}`,
+        json({ name: dot.name, agent: 'cursor' }, 'PUT'),
+      )
+    ).status,
+  ).toBe(400);
+  // a Claude Dot sends no agent, so an older Hearth-backend still spins it up
+  const claude = await (
+    await app.request('/api/dots', json({ name: 'Plain' }))
+  ).json();
+  expect(workspace.space(claude.spaceId)?.agent).toBe('claude_code');
+  expect(
+    backend.calls.filter((call) => call.path === '/api/containers').at(-1)
+      ?.body,
+  ).not.toHaveProperty('agent');
 });

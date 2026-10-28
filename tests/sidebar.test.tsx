@@ -20,8 +20,9 @@ const workspace: WorkspaceState = {
       createdAt: 0,
       pageCount: 3,
       container: 'hearth-container-everyday',
+      agent: 'claude_code',
       stage: 'ready',
-      claude: false,
+      signedIn: false,
     },
   ],
   dots: [

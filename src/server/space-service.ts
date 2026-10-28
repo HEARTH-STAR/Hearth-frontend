@@ -1,11 +1,12 @@
+import { AGENTS, DEFAULT_AGENT, type AgentId } from '../shared/agents.js';
 import type {
-  ClaudeStatus,
+  AgentStatus,
   Space,
   SpaceSetup,
   SpaceStage,
   StoredSpace,
 } from '../shared/types.js';
-import { claudeStatus, githubStatus } from './connections.js';
+import { agentStatus, githubStatus } from './connections.js';
 import type { HearthConfig } from './config.js';
 import {
   HearthBackendError,
@@ -18,7 +19,7 @@ import { slug, type WorkspaceStore } from './workspace.js';
 /** The container port the ``space`` template runs Hearth-Core on. */
 export const CORE_PORT = '5010';
 const FRESH_MS = 4000;
-const CLAUDE_FRESH_MS = 30_000;
+const AGENT_FRESH_MS = 30_000;
 const PROBE_TIMEOUT_MS = 2500;
 
 interface Probe {
@@ -70,15 +71,16 @@ const missing = (error: unknown) =>
 /**
  * Spaces as containers. Creating a Space spins up its container through Hearth-backend (template
  * ``space``: Hearth-Core on port 5010, published on loopback); everything a Space's Dots do (chat
- * turns, files, Claude Code and GitHub sign-in) goes to the Hearth-Core inside it.
+ * turns, files, the agent's and GitHub's sign-in) goes to the Hearth-Core inside it. The agent is
+ * the Dot's choice (Claude Code, Cursor or Antigravity), set in the container as it is spun up.
  */
 export class SpaceService {
   private starting = new Map<string, Promise<void>>();
   private failures = new Map<string, string>();
   private probes = new Map<string, { at: number; value: Promise<Probe> }>();
-  private claude = new Map<
+  private agents = new Map<
     string,
-    { at: number; value: Promise<ClaudeStatus | null> }
+    { at: number; value: Promise<AgentStatus | null> }
   >();
   private clients = new Map<string, HearthCore>();
   constructor(
@@ -96,9 +98,9 @@ export class SpaceService {
   containerName(space: StoredSpace) {
     return `${slug(space.name, 'space')}-${space.id.slice(0, 8)}`;
   }
-  /** A new Space, its container already on the way. */
-  create(name: string, description: string) {
-    const space = this.workspace.createSpace(name, description);
+  /** A new Space running ``agent``, its container already on the way. */
+  create(name: string, description: string, agent: AgentId = DEFAULT_AGENT) {
+    const space = this.workspace.createSpace(name, description, agent);
     this.start(space.id);
     return space;
   }
@@ -152,6 +154,9 @@ export class SpaceService {
       const container = await this.backend.spinUp(
         name,
         this.config.containerTemplate,
+        // Claude Code is Hearth-Core's own default: a Claude Space sends no agent, so it also
+        // spins up on a Hearth-backend that predates the choice.
+        space.agent === DEFAULT_AGENT ? undefined : space.agent,
       );
       this.workspace.setSpaceContainer(space.id, container.name);
     } catch (error) {
@@ -166,7 +171,7 @@ export class SpaceService {
   }
   private forget(spaceId: string) {
     this.probes.delete(spaceId);
-    this.claude.delete(spaceId);
+    this.agents.delete(spaceId);
   }
   private client(url: string) {
     let client = this.clients.get(url);
@@ -248,29 +253,30 @@ export class SpaceService {
     const probe = await this.probe(space.id);
     return probe.stage === 'ready' ? undefined : notReady(space, probe);
   }
-  /** Claude Code's sign-in inside the container; null while the container does not answer. */
-  claudeStatus(spaceId: string, force = false): Promise<ClaudeStatus | null> {
-    const cached = this.claude.get(spaceId);
-    if (!force && cached && Date.now() - cached.at < CLAUDE_FRESH_MS)
+  /** The Space agent's sign-in inside the container; null while the container does not answer. */
+  agentStatus(spaceId: string, force = false): Promise<AgentStatus | null> {
+    const cached = this.agents.get(spaceId);
+    if (!force && cached && Date.now() - cached.at < AGENT_FRESH_MS)
       return cached.value;
+    const agent = this.space(spaceId).agent;
     const value = this.core(spaceId).then(
-      async (core) => claudeStatus(await core.claudeStatus()),
+      async (core) => agentStatus(await core.agentStatus(agent)),
       () => null,
     );
-    this.claude.set(spaceId, { at: Date.now(), value });
+    this.agents.set(spaceId, { at: Date.now(), value });
     return value;
   }
   /** Forget the cached sign-in after a login or logout. */
-  claudeChanged(spaceId: string) {
-    this.claude.delete(spaceId);
+  agentChanged(spaceId: string) {
+    this.agents.delete(spaceId);
   }
   async list(): Promise<Space[]> {
     return Promise.all(
       this.workspace.spaces().map(async (space) => {
         const { stage } = await this.probe(space.id);
-        const claude =
-          stage === 'ready' ? await this.claudeStatus(space.id) : null;
-        return { ...space, stage, claude: claude ? claude.connected : null };
+        const agent =
+          stage === 'ready' ? await this.agentStatus(space.id) : null;
+        return { ...space, stage, signedIn: agent ? agent.connected : null };
       }),
     );
   }
@@ -279,31 +285,34 @@ export class SpaceService {
     const probe = await this.probe(space.id);
     const ready = probe.stage === 'ready' && probe.url;
     const client = ready ? this.client(probe.url!) : undefined;
-    const [claude, github] = client
+    const agentName = AGENTS[space.agent].name;
+    const [agent, github] = client
       ? await Promise.all([
           // Asked directly, so the setup can say why the sign-in is unavailable.
-          client.claudeStatus().then(claudeStatus, (error: unknown) => ({
-            connected: false,
-            method: null,
-            email: null,
-            organization: null,
-            subscription: null,
-            loginSupported: false,
-            error: `This Space’s Hearth-Core cannot report Claude Code’s sign-in${
-              error instanceof HearthCoreError && error.status === 404
-                ? ': it predates the sign-in. Update Hearth-Core, then start the container again'
-                : error instanceof Error
-                  ? `: ${error.message}`
-                  : ''
-            }.`,
-          })),
+          client
+            .agentStatus(space.agent)
+            .then(agentStatus, (error: unknown) => ({
+              connected: false,
+              method: null,
+              email: null,
+              organization: null,
+              subscription: null,
+              loginSupported: false,
+              error: `This Space’s Hearth-Core cannot report ${agentName}’s sign-in${
+                error instanceof HearthCoreError && error.status === 404
+                  ? `: it does not run ${agentName}. Update Hearth-Core, then start the container again`
+                  : error instanceof Error
+                    ? `: ${error.message}`
+                    : ''
+              }.`,
+            })),
           client.githubStatus().then(githubStatus, () => null),
         ])
       : [null, null];
-    if (claude)
-      this.claude.set(space.id, {
+    if (agent)
+      this.agents.set(space.id, {
         at: Date.now(),
-        value: Promise.resolve(claude.error ? null : claude),
+        value: Promise.resolve(agent.error ? null : agent),
       });
     return {
       stage: probe.stage,
@@ -311,7 +320,7 @@ export class SpaceService {
       status: probe.status,
       coreUrl: probe.url,
       ...(probe.error ? { error: probe.error } : {}),
-      claude,
+      agent,
       github,
     };
   }
