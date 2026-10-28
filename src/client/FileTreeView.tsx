@@ -9,6 +9,19 @@ export function foldersOf(path: string) {
     .slice(0, path.endsWith('/') ? parts.length : parts.length - 1)
     .map((_, i) => `${parts.slice(0, i + 1).join('/')}/`);
 }
+/**
+ * The tree shows a name's "…" once its hidden wrapped copy is taller than one line
+ * (``@container measure (height > 1lh)``). At fractional zoom (90%, 110%, …) a name that fits
+ * measures a hair over one line, so every name lost its middle (``st…ge``). A real overflow wraps
+ * to two lines, so the "…" waits for 1.5 lines. Injected in the tree's own layer after its styles.
+ */
+export const TRUNCATION_FIX = `
+@container measure (height > 1lh) {
+  [data-truncate-marker] { opacity: 0; }
+}
+@container measure (height > 1.5lh) {
+  [data-truncate-marker] { opacity: 1; }
+}`;
 /** Every folder in a listing, from its file paths. */
 function allFolders(files: string[]) {
   return [...new Set(files.flatMap(foldersOf))];
@@ -41,6 +54,7 @@ export function FileTreeView({
     flattenEmptyDirectories: true,
     density: 'compact',
     icons: { set: 'complete', colored: true },
+    unsafeCSS: TRUNCATION_FIX,
     initialSelectedPaths: selected ? [selected] : [],
     onSelectionChange: (paths) => {
       const path = paths[0];

@@ -6,9 +6,12 @@ export interface TreeSize {
   width?: number;
   height?: number;
 }
-/** The least the tree and the code each keep, across and down. */
+/**
+ * The least the tree and the code each keep, across and down. Below 220px across, the tree
+ * shortens nested names to a few letters (``st…ge`` for ``storage``), so it stops there.
+ */
 export const LIMITS = {
-  width: { tree: 160, code: 220 },
+  width: { tree: 220, code: 220 },
   height: { tree: 100, code: 120 },
 } as const;
 
