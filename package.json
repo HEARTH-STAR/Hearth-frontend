@@ -13,8 +13,8 @@
     "test": "cross-env DO_NOT_TRACK=1 vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests vite.config.ts",
-    "format": "prettier --write src tests *.json *.ts *.js index.html public .github Dockerfile \"compose*.yml\" README.md .env.example --ignore-unknown",
-    "check-format": "prettier --check src tests *.json *.ts *.js index.html public .github Dockerfile \"compose*.yml\" README.md .env.example --ignore-unknown"
+    "format": "prettier --write src tests *.json *.ts *.js index.html welcome public .github Dockerfile \"compose*.yml\" README.md .env.example --ignore-unknown",
+    "check-format": "prettier --check src tests *.json *.ts *.js index.html welcome public .github Dockerfile \"compose*.yml\" README.md .env.example --ignore-unknown"
   },
   "keywords": [],
   "author": "Sagar Rambade",

@@ -3,7 +3,17 @@ import { pageReviewSchema, pageReviewTool } from '../shared/page-review';
 import { contextualMessage, type PageContext } from './page-context';
 import { api } from './api';
 import type { Page } from '../server/pages';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from 'react';
+import type { WorkspaceListing } from '../shared/computer-types';
+import { dotFiles, insertReference } from './file-reference';
+import { FilePicker } from './FilePicker';
 import {
   CopilotChatToolCallsView,
   useRenderTool,
@@ -11,12 +21,26 @@ import {
   useAgent,
   useCopilotKit,
 } from '@copilotkit/react-core/v2';
-import { ArrowUp, FilePlus, Monitor, Plus, Square } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  FilePlus,
+  Monitor,
+  Plus,
+  Square,
+} from 'lucide-react';
 import { ToolRow, type ToolRenderProps } from './ToolRow';
 import { ChatTranscript } from './ChatTranscript';
 import type { Conversation, Dot, Space } from '../shared/types';
 import { DotHeader } from './DotHeader';
 import { shouldSubmitComposerOnKeyDown } from './chat-composer';
+import { useStickToBottom } from './chat-scroll';
+import {
+  ChatStart,
+  composerPlaceholder,
+  focusBlank,
+  SetupCard,
+} from './ChatStart';
 /** Matches the server's ``ACTIVITY_EVENT``: what the agent is doing right now. */
 const ACTIVITY_EVENT = 'hearth.activity';
 export function Chat({
@@ -89,7 +113,15 @@ export function Chat({
   const [running, setRunning] = useState(false);
   const [activity, setActivity] = useState('');
   const sent = useRef(false);
-  const bottom = useRef<HTMLDivElement>(null);
+  const { scroller, content, away, jump } = useStickToBottom();
+  const input = useRef<HTMLTextAreaElement>(null);
+  const loadFiles = useDotFiles(dot);
+  const space = spaces.find((item) => item.id === dot.spaceId);
+  /** A starter fills the composer, with its first [blank] selected for typing over. */
+  const pickStarter = (text: string) => {
+    setDraft(text);
+    requestAnimationFrame(() => focusBlank(input.current, text));
+  };
   const finished = useRef(onTurnFinished);
   finished.current = onTurnFinished;
   // Connecting replays the conversation, including errors of earlier turns; only new ones show.
@@ -150,6 +182,8 @@ export function Chat({
       content: contextualMessage(text, pageContext),
     });
     setDraft('');
+    // Your own message brings you back to the end, following the reply.
+    jump();
     try {
       await copilotkit.runAgent({ agent });
       onSaved();
@@ -170,9 +204,6 @@ export function Chat({
       void send(initialPrompt);
     }
   }, [loaded, contextReady, paused, initialPrompt]);
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
-  }, [agent.messages.length, running, activity]);
   useHumanInTheLoop(
     {
       name: pageReviewTool.name,
@@ -216,6 +247,7 @@ export function Chat({
       <DotHeader
         dot={dot}
         online={online}
+        title={thread.title}
         state={paused ? 'paused' : working ? 'working' : 'idle'}
       >
         {headerActions}
@@ -263,13 +295,16 @@ export function Chat({
           </a>
         </div>
       )}
-      <div className="chat-scroll">
-        <div className="chat-column">
+      <div className="chat-scroll" ref={scroller}>
+        <div className="chat-column" ref={content}>
           {!visible.length && (
-            <div className="chat-welcome">
-              <h2>What should {dot.name} work on?</h2>
-              <p>{dot.instructions}</p>
-            </div>
+            <ChatStart
+              dot={dot}
+              space={space}
+              online={online}
+              paused={paused}
+              onPick={pickStarter}
+            />
           )}
           <ChatTranscript
             messages={visible}
@@ -290,10 +325,17 @@ export function Chat({
               </span>
             </div>
           )}
-          <div ref={bottom} />
         </div>
       </div>
       <div className="chat-dock">
+        {away && visible.length > 0 && (
+          <button type="button" className="jump-latest" onClick={jump}>
+            <ArrowDown size={14} aria-hidden="true" /> Jump to latest
+          </button>
+        )}
+        {!online && !paused && visible.length > 0 && (
+          <SetupCard dot={dot} space={space} compact />
+        )}
         {contextError && (
           <div className="chat-error" role="alert">
             {contextError}
@@ -319,19 +361,42 @@ export function Chat({
           </div>
         )}
         <Composer
+          inputRef={input}
           value={draft}
           onChange={setDraft}
-          placeholder={paused ? 'All Dots are paused' : 'Ask anything'}
-          disabled={!loaded || !contextReady || paused}
+          placeholder={composerPlaceholder({
+            name: dot.name,
+            paused,
+            online,
+            started: visible.length > 0,
+          })}
+          disabled={!loaded || !contextReady || paused || !online}
           running={working}
           onStop={() => copilotkit.stopAgent({ agent })}
           onSubmit={() => void send(draft)}
-          onAttach={onComputer}
+          name={dot.name}
+          loadFiles={loadFiles}
+          onOpenFiles={onComputer}
         />
       </div>
     </div>
   );
 }
+/** The Dot's files for the composer's "+", relative to its folder. Stable per Dot. */
+export function useDotFiles(dot: Dot | undefined) {
+  const id = dot?.id;
+  const directory = dot?.directory;
+  return useCallback(async () => {
+    if (!id || !directory) return [];
+    return dotFiles(
+      await api<WorkspaceListing>(
+        `/dots/${encodeURIComponent(id)}/computer/files`,
+      ),
+      directory,
+    );
+  }, [id, directory]);
+}
+
 export function Composer({
   value,
   onChange,
@@ -340,7 +405,10 @@ export function Composer({
   disabled,
   running = false,
   onStop,
-  onAttach,
+  name = 'Dot',
+  loadFiles,
+  onOpenFiles,
+  inputRef,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -349,8 +417,43 @@ export function Composer({
   disabled: boolean;
   running?: boolean;
   onStop?: () => void;
-  onAttach?: () => void;
+  /** The Dot's name, for the file picker. */
+  name?: string;
+  /** With it, "+" picks a file to reference as @path. */
+  loadFiles?: () => Promise<string[]>;
+  /** Opens the Computer panel's Files tab (from the picker, or "+" without loadFiles). */
+  onOpenFiles?: () => void;
+  inputRef?: Ref<HTMLTextAreaElement>;
 }) {
+  const own = useRef<HTMLTextAreaElement | null>(null);
+  const setInput = (element: HTMLTextAreaElement | null) => {
+    own.current = element;
+    if (typeof inputRef === 'function') inputRef(element);
+    else if (inputRef)
+      (inputRef as { current: HTMLTextAreaElement | null }).current = element;
+  };
+  const [picking, setPicking] = useState(false);
+  const closePicker = useCallback(() => {
+    setPicking(false);
+    own.current?.focus();
+  }, []);
+  /** Put @path where the cursor was (or over the selection), then type on after it. */
+  const pick = (path: string) => {
+    const input = own.current;
+    const next = insertReference(
+      value,
+      input?.selectionStart ?? value.length,
+      input?.selectionEnd ?? value.length,
+      path,
+    );
+    onChange(next.value);
+    setPicking(false);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(next.cursor, next.cursor);
+    });
+  };
+  const off = disabled && !running;
   return (
     <form
       className="composer"
@@ -359,18 +462,30 @@ export function Composer({
         if (value.trim() && !disabled && !running) onSubmit();
       }}
     >
-      {onAttach && (
+      {picking && loadFiles && (
+        <FilePicker
+          name={name}
+          load={loadFiles}
+          onPick={pick}
+          onClose={closePicker}
+          onOpenFiles={onOpenFiles}
+        />
+      )}
+      {(loadFiles || onOpenFiles) && (
         <button
           type="button"
-          className="composer-plus"
-          aria-label="Open the computer's files"
-          title="Files"
-          onClick={onAttach}
+          className={`composer-plus ${picking ? 'active' : ''}`}
+          aria-label={loadFiles ? 'Reference a file' : 'Open the Files panel'}
+          aria-expanded={loadFiles ? picking : undefined}
+          title={loadFiles ? 'Reference a file' : 'Files'}
+          disabled={off}
+          onClick={() => (loadFiles ? setPicking(!picking) : onOpenFiles?.())}
         >
           <Plus size={18} />
         </button>
       )}
       <textarea
+        ref={setInput}
         aria-label="Message"
         placeholder={placeholder}
         rows={1}

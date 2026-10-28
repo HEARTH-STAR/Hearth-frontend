@@ -48,6 +48,8 @@ app.use('*', async (c, next) => {
   await next();
 });
 app.get('/api/*', (c) => c.json({ error: 'Not found.' }, 404));
+// The landing page is dist/client/welcome/index.html; without the slash, /welcome would get the app.
+app.get('/welcome', (c) => c.redirect('/welcome/', 301));
 app.use('/*', serveStatic({ root: './dist/client' }));
 app.get('*', serveStatic({ path: './dist/client/index.html' }));
 const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
