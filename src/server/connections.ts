@@ -1,5 +1,5 @@
-import type { ClaudeStatus, GitHubStatus } from '../shared/types.js';
-import type { ClaudeConnection, GitHubConnection } from './hearth-core.js';
+import type { AgentStatus, GitHubStatus } from '../shared/types.js';
+import type { AgentConnection, GitHubConnection } from './hearth-core.js';
 // Hearth-Core's connector answers, mapped to the shapes the app shows.
 
 /** The GitHub connector (the gh CLI inside the container). */
@@ -26,8 +26,8 @@ export function githubStatus(raw: GitHubConnection): GitHubStatus {
   };
 }
 
-/** Claude Code's sign-in (the claude_code adapter). Never carries a credential. */
-export function claudeStatus(raw: ClaudeConnection): ClaudeStatus {
+/** The Space agent's sign-in (its Hearth-Core adapter). Never carries a credential. */
+export function agentStatus(raw: AgentConnection): AgentStatus {
   const connected = raw.status === 'connected';
   return {
     connected,

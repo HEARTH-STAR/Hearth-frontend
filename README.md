@@ -70,8 +70,15 @@ Follow the Setup page:
 1. **Container**: a new Dot starts its container at once (Scout has a **Start container**
    button). The first one builds the `space` image and its first start installs Hearth-Core's
    packages; both take a few minutes.
-2. **Claude Code**: **Sign in to Claude**, approve on claude.com, and paste the code it shows.
-   Hearth-Core runs `claude auth login` inside the container, so the login lives there.
+2. **The Dot's agent**, picked when the Dot was made (Claude Code by default):
+   - **Claude Code**: **Sign in to Claude**, approve on claude.com, and paste the code it shows.
+   - **Cursor**: **Sign in to Cursor** and approve on cursor.com; the page finishes on its own.
+   - **Antigravity**: **Sign in to Google**, approve, and paste the code Google shows.
+
+   Hearth-Core runs the agent's own login inside the container, so the login lives there. A
+   Cursor or Antigravity Space downloads that agent's CLI on its first start (Hearth-backend's
+   `install-agent-cli`, pinned by version and checksum), so that start takes a little longer.
+
 3. **GitHub** (optional): a one-time code or a personal access token, for the gh CLI inside the
    container.
 
@@ -83,7 +90,7 @@ Setup page shows what is missing.
 | Surface              | What it shows                                                                                                                                                                  | Backed by                                                      |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
 | Sidebar              | Search, Dots with their latest conversation; each Dot's **…** menu (Setup, Pages), Settings                                                                                    | this server's SQLite                                           |
-| Setup (Dot menu)     | The Dot's Space: its container, then Claude Code sign-in (link + pasted code), then GitHub                                                                                     | Hearth-backend, then the Space's Hearth-Core                   |
+| Setup (Dot menu)     | The Dot's Space: its container, then its agent's sign-in (Claude Code, Cursor or Antigravity), then GitHub                                                                     | Hearth-backend, then the Space's Hearth-Core                   |
 | Pages (Dot menu)     | The Dot's Space's pages                                                                                                                                                        | this server's SQLite                                           |
 | Conversation         | Your messages; Claude Code's replies, justified, each heading's section a card (code with Copy, framed tables); one row per tool call ("Ran wc -l … → 41 lines"); review cards | the home Space's Hearth-Core `POST /api/chat`                  |
 | Review before saving | A draft with **Approve & save** / **Decline**; only approval saves the page                                                                                                    | CopilotKit human-in-the-loop                                   |
@@ -132,7 +139,7 @@ src/server/
   app.ts                 /api guards (host, origin, owner token, JSON), settings
   platform.ts            CopilotKit runtime (SSE, SQLite runner), one HearthAgent per Dot
   space-service.ts       Spaces as containers: spin-up, stage, each Space's Hearth-Core
-  space-routes.ts        /api/spaces: create, setup, container start, Claude Code sign-in
+  space-routes.ts        /api/spaces: create, setup, container start, agent sign-in
   github-routes.ts       /api/spaces/:id/github*: the Space's gh account
   connections.ts         Hearth-Core connector answers → what the app shows
   hearth-agent.ts        AG-UI agent ⇄ a Space's Hearth-Core chat turn

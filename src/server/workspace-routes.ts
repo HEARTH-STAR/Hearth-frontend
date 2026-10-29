@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { folderPath } from '../shared/computer-types.js';
 import { Platform } from './platform.js';
 import { DEFAULT_INSTRUCTIONS } from './workspace.js';
+import { AGENT_IDS, type AgentId } from '../shared/agents.js';
 const dotSchema = z
   .object({
     name: z.string().trim().min(1).max(40),
@@ -13,6 +14,8 @@ const dotSchema = z
     spaceIds: z.array(z.string().min(1)).min(1).max(100).optional(),
     /** The Dot's home Space. A new Dot without one gets its own; an edit without one keeps it. */
     spaceId: z.string().min(1).optional(),
+    /** The agent of a new Dot's own Space (default Claude Code). Fixed once its container exists. */
+    agent: z.enum(AGENT_IDS as [AgentId, ...AgentId[]]).optional(),
   })
   .strict();
 export function workspaceRoutes(platform: Platform) {
@@ -41,8 +44,16 @@ export function workspaceRoutes(platform: Platform) {
       spaceId,
       spaceIds = [],
       instructions = DEFAULT_INSTRUCTIONS,
+      agent,
       ...dot
     } = data.data;
+    if (spaceId && agent)
+      return c.json(
+        {
+          error: 'A Dot that joins an existing Space runs that Space’s agent.',
+        },
+        400,
+      );
     if (spaceId)
       return c.json(
         platform.workspace.createDot({
@@ -59,7 +70,7 @@ export function workspaceRoutes(platform: Platform) {
         { error: 'Space access must include a valid default destination.' },
         400,
       );
-    const home = platform.spaces.create(dot.name, '').id;
+    const home = platform.spaces.create(dot.name, '', agent).id;
     return c.json(
       platform.workspace.createDot({
         ...dot,
@@ -74,6 +85,8 @@ export function workspaceRoutes(platform: Platform) {
     const data = dotSchema.safeParse(await c.req.json().catch(() => null));
     if (!data.success)
       return c.json({ error: 'Invalid specialist settings.' }, 400);
+    if (data.data.agent)
+      return c.json({ error: 'A Dot’s agent is chosen when it is made.' }, 400);
     if (!platform.workspace.dot(c.req.param('id')))
       return c.json({ error: 'Dot not found.' }, 404);
     return c.json(platform.workspace.updateDot(c.req.param('id'), data.data));

@@ -2,6 +2,7 @@ import type {
   WorkspaceFile,
   WorkspaceListing,
 } from '../shared/computer-types.js';
+import { AGENTS, type AgentId } from '../shared/agents.js';
 // Hearth-Core's HTTP API, as the Hearth web app uses it. Each Space's container runs one Hearth-Core;
 // only this server talks to it, the browser never does.
 
@@ -87,8 +88,8 @@ export interface GitHubDeviceLogin {
   verification_uri: string;
   expires_in: number;
 }
-/** The claude_code adapter's sign-in routes (``/api/connectors/claude-code``), as returned. */
-export interface ClaudeConnection {
+/** An agent adapter's sign-in routes (``/api/connectors/<connector>``), as returned. */
+export interface AgentConnection {
   status: 'connected' | 'needs_auth' | 'unavailable' | string;
   method?: string | null;
   email?: string | null;
@@ -97,12 +98,14 @@ export interface ClaudeConnection {
   login_supported?: boolean;
   error?: string;
 }
-export interface ClaudeLoginStart {
-  session_id: string;
-  auth_url: string;
+export interface AgentLoginStart {
+  /** Null when the agent was already signed in (Cursor and Antigravity say so instead of a link). */
+  session_id: string | null;
+  auth_url: string | null;
   expires_in: number;
+  status?: string;
 }
-export interface ClaudeLoginOutcome {
+export interface AgentLoginOutcome {
   status: 'pending' | 'connected' | 'invalid_code' | 'failed' | 'cancelled';
   session_id: string;
   error?: string;
@@ -265,40 +268,48 @@ export class HearthCore {
   githubDisconnect() {
     return this.github<GitHubConnection>('/disconnect');
   }
-  // Claude Code sign-in: ``claude auth login`` run by Hearth-Core inside the container.
-  private async claude<T>(path: string, body?: unknown): Promise<T> {
+  // The agent's sign-in, run by Hearth-Core inside the container through the agent's adapter
+  // (``claude auth login``, ``cursor-agent login``, a throwaway ``agy -p``).
+  private async connector<T>(
+    agent: AgentId,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
     const init =
       path === '/status'
         ? { method: 'GET' }
         : { method: 'POST', body: JSON.stringify(body ?? {}) };
     return (
-      await this.request(`/api/connectors/claude-code${path}`, init)
+      await this.request(
+        `/api/connectors/${AGENTS[agent].connector}${path}`,
+        init,
+      )
     ).json() as Promise<T>;
   }
-  claudeStatus() {
-    return this.claude<ClaudeConnection>('/status');
+  agentStatus(agent: AgentId) {
+    return this.connector<AgentConnection>(agent, '/status');
   }
-  claudeLoginStart() {
-    return this.claude<ClaudeLoginStart>('/login/start');
+  agentLoginStart(agent: AgentId) {
+    return this.connector<AgentLoginStart>(agent, '/login/start');
   }
-  /** Hands the CLI the ``code#state`` the owner pasted; waits briefly for its verdict. */
-  claudeLoginCode(sessionId: string, code: string) {
-    return this.claude<ClaudeLoginOutcome>('/login/code', {
+  /** Hands the CLI the code the owner pasted (Claude, Antigravity); waits briefly for its verdict. */
+  agentLoginCode(agent: AgentId, sessionId: string, code: string) {
+    return this.connector<AgentLoginOutcome>(agent, '/login/code', {
       session_id: sessionId,
       code,
     });
   }
-  claudeLoginPoll(sessionId: string) {
-    return this.claude<ClaudeLoginOutcome>('/login/poll', {
+  agentLoginPoll(agent: AgentId, sessionId: string) {
+    return this.connector<AgentLoginOutcome>(agent, '/login/poll', {
       session_id: sessionId,
     });
   }
-  claudeLoginCancel(sessionId: string) {
-    return this.claude<ClaudeLoginOutcome>('/login/cancel', {
+  agentLoginCancel(agent: AgentId, sessionId: string) {
+    return this.connector<AgentLoginOutcome>(agent, '/login/cancel', {
       session_id: sessionId,
     });
   }
-  claudeLogout() {
-    return this.claude<ClaudeConnection>('/logout');
+  agentLogout(agent: AgentId) {
+    return this.connector<AgentConnection>(agent, '/logout');
   }
 }

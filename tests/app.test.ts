@@ -212,7 +212,7 @@ describe('workspace', () => {
       pageCount: 1,
       container: SPACE_CONTAINER,
       stage: 'ready',
-      claude: true,
+      signedIn: true,
     });
     expect(body.dots[0].name).toBe('Scout');
     expect(body.dots[0]).not.toHaveProperty('role');
@@ -233,7 +233,7 @@ describe('workspace', () => {
     });
     open.push(starting);
     const body = await (await starting.app.request('/api/workspace')).json();
-    expect(body.spaces[0]).toMatchObject({ stage: 'booting', claude: null });
+    expect(body.spaces[0]).toMatchObject({ stage: 'booting', signedIn: null });
     expect(body.setup.missing).toEqual(['Docker']);
     const down = base({
       backend: {

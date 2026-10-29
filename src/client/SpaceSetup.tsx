@@ -8,11 +8,12 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type {
-  ClaudeLogin,
-  ClaudeLoginState,
+  AgentLogin,
+  AgentLoginState,
   Space,
   SpaceSetup as Setup,
 } from '../shared/types';
+import { agentOf } from '../shared/agents';
 import { api } from './api';
 import { GitHubDialog, GitHubMark } from './GitHubDialog';
 import { STAGE_LABEL, startable, working } from './space-stage';
@@ -20,8 +21,10 @@ import { STAGE_LABEL, startable, working } from './space-stage';
 const message = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
 /**
- * A Space's setup, in order: its container (Hearth-backend spins it up), then Claude Code and
- * GitHub, both signed in inside that container through the Hearth-Core running there.
+ * A Space's setup, in order: its container (Hearth-backend spins it up), then its agent (Claude Code,
+ * Cursor or Antigravity, chosen when its Dot was made) and GitHub, both signed in inside that container
+ * through the Hearth-Core running there. Claude and Antigravity show a code to paste back; Cursor's
+ * sign-in finishes on its own once the owner approves, so it is polled.
  */
 export function SpaceSetup({
   space,
@@ -32,10 +35,11 @@ export function SpaceSetup({
   onChanged: () => void;
 }) {
   const base = `/spaces/${encodeURIComponent(space.id)}`;
+  const agent = agentOf(space);
   const [setup, setSetup] = useState<Setup>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
-  const [login, setLogin] = useState<ClaudeLogin>();
+  const [login, setLogin] = useState<AgentLogin>();
   const [code, setCode] = useState('');
   const [loginError, setLoginError] = useState('');
   const [waiting, setWaiting] = useState(false);
@@ -78,7 +82,7 @@ export function SpaceSetup({
   useEffect(
     () => () => {
       if (pending.current)
-        void api(`${base}/claude/login/cancel`, 'POST', {
+        void api(`${base}/agent/login/cancel`, 'POST', {
           sessionId: pending.current,
         }).catch(() => {});
     },
@@ -102,7 +106,7 @@ export function SpaceSetup({
         setError(message(cause, 'The container did not start.'));
       }
     });
-  const finished = async (state: ClaudeLoginState) => {
+  const finished = async (state: AgentLoginState) => {
     if (state.status === 'pending') return false;
     if (state.status === 'connected') {
       setLogin(undefined);
@@ -112,16 +116,20 @@ export function SpaceSetup({
       changed.current();
     } else if (state.status === 'invalid_code') {
       setLoginError(
-        'That code did not work. Copy the whole code from Claude’s page and paste it again.',
+        `That code did not work. Copy the whole code from ${agent.account}’s page and paste it again.`,
       );
     } else {
       setLogin(undefined);
       setCode('');
-      // Claude Code ends the sign-in when it rejects a code, so a retry starts over.
+      // The CLI ends the sign-in when it rejects a code, so a retry starts over.
       setLoginError(
         state.status === 'cancelled'
           ? 'Sign-in was cancelled.'
-          : `${state.error || 'Sign-in did not finish.'} Start again, and paste the whole code Claude shows.`,
+          : `${state.error || 'Sign-in did not finish.'} Start again${
+              agent.pastesCode
+                ? `, and paste the whole code ${agent.account} shows.`
+                : '.'
+            }`,
       );
     }
     return true;
@@ -133,8 +141,8 @@ export function SpaceSetup({
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const state = await api<ClaudeLoginState>(
-          `${base}/claude/login/poll`,
+        const state = await api<AgentLoginState>(
+          `${base}/agent/login/poll`,
           'POST',
           { sessionId: login.sessionId },
         );
@@ -156,13 +164,25 @@ export function SpaceSetup({
     // finished only uses state setters and load, which stay the same for this Space.
   }, [waiting, login, base]);
   const signIn = () =>
-    run('claude', async () => {
+    run('agent', async () => {
       setLoginError('');
       try {
-        setLogin(await api<ClaudeLogin>(`${base}/claude/login`, 'POST', {}));
+        const started = await api<AgentLogin>(
+          `${base}/agent/login`,
+          'POST',
+          {},
+        );
+        if (started.connected) {
+          await load();
+          changed.current();
+          return;
+        }
+        setLogin(started);
         setCode('');
+        // No code to paste: the CLI finishes once the owner approves, so watch for it.
+        if (!agent.pastesCode) setWaiting(true);
       } catch (cause) {
-        setLoginError(message(cause, 'Could not start Claude Code sign-in.'));
+        setLoginError(message(cause, `Could not start ${agent.name} sign-in.`));
       }
     });
   const submit = () =>
@@ -170,8 +190,8 @@ export function SpaceSetup({
       if (!login) return;
       setLoginError('');
       try {
-        const state = await api<ClaudeLoginState>(
-          `${base}/claude/login/code`,
+        const state = await api<AgentLoginState>(
+          `${base}/agent/login/code`,
           'POST',
           { sessionId: login.sessionId, code: code.trim() },
         );
@@ -188,7 +208,7 @@ export function SpaceSetup({
       setWaiting(false);
       setCode('');
       if (sessionId)
-        await api(`${base}/claude/login/cancel`, 'POST', { sessionId }).catch(
+        await api(`${base}/agent/login/cancel`, 'POST', { sessionId }).catch(
           () => {},
         );
     });
@@ -196,12 +216,12 @@ export function SpaceSetup({
     run('logout', async () => {
       if (
         !window.confirm(
-          `Sign Claude Code out of ${space.name}? It cannot run until you sign in again.`,
+          `Sign ${agent.name} out of ${space.name}? It cannot run until you sign in again.`,
         )
       )
         return;
       try {
-        await api(`${base}/claude/logout`, 'POST', {});
+        await api(`${base}/agent/logout`, 'POST', {});
         await load();
         changed.current();
       } catch (cause) {
@@ -211,9 +231,9 @@ export function SpaceSetup({
 
   const current = setup?.stage ?? space.stage;
   const ready = current === 'ready';
-  const claude = setup?.claude;
+  const signin = setup?.agent;
   const github = setup?.github;
-  const complete = ready && !!claude?.connected && !!github?.connected;
+  const complete = ready && !!signin?.connected && !!github?.connected;
   return (
     <section
       className={`space-setup ${complete ? 'complete' : ''}`}
@@ -222,7 +242,7 @@ export function SpaceSetup({
       <header>
         <h2>{complete ? 'This Space is ready.' : 'Set up this Space'}</h2>
         <p>
-          {space.name} runs in its own container. Claude Code and GitHub are
+          {space.name} runs in its own container. {agent.name} and GitHub are
           signed in inside it.
         </p>
       </header>
@@ -283,27 +303,28 @@ export function SpaceSetup({
             </button>
           )}
         </li>
-        <li className={claude?.connected ? 'done' : ready ? '' : 'blocked'}>
+        <li className={signin?.connected ? 'done' : ready ? '' : 'blocked'}>
           <span className="setup-mark" aria-hidden="true">
-            {claude?.connected ? <Check size={14} /> : <Sparkles size={14} />}
+            {signin?.connected ? <Check size={14} /> : <Sparkles size={14} />}
           </span>
           <div className="setup-text">
-            <strong>Claude Code</strong>
+            <strong>{agent.name}</strong>
             <span>
               {!ready
                 ? 'Signs in once the container runs.'
-                : claude?.connected
+                : signin?.connected
                   ? [
-                      claude.email ?? 'Signed in',
-                      claude.subscription && `Claude ${claude.subscription}`,
+                      signin.email ?? 'Signed in',
+                      signin.subscription &&
+                        `${agent.account} ${signin.subscription}`,
                     ]
                       .filter(Boolean)
                       .join(' · ')
-                  : claude?.error
-                    ? claude.error
-                    : claude && !claude.loginSupported
+                  : signin?.error
+                    ? signin.error
+                    : signin && !signin.loginSupported
                       ? 'Sign-in needs a Linux container; this Hearth-Core cannot run it.'
-                      : `Sign in with your Claude account. ${space.name} runs on it.`}
+                      : `Sign in with your ${agent.account} account. ${space.name} runs on it.`}
             </span>
             {login && (
               <form
@@ -319,28 +340,37 @@ export function SpaceSetup({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  1. Approve on claude.com <ArrowUpRight size={14} />
+                  1. {agent.approveLabel} <ArrowUpRight size={14} />
                 </a>
-                <label className="field-label" htmlFor="claude-code">
-                  2. Paste the code Claude shows you
-                </label>
-                <div className="claude-code-row">
-                  <input
-                    id="claude-code"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="code#state"
-                    value={code}
-                    maxLength={4096}
-                    onChange={(event) => setCode(event.target.value)}
-                  />
-                  <button disabled={!code.trim() || !!busy || waiting}>
-                    {busy === 'code' || waiting ? (
-                      <LoaderCircle size={14} className="spinning" />
-                    ) : null}
-                    Sign in
-                  </button>
-                </div>
+                {agent.pastesCode ? (
+                  <>
+                    <label className="field-label" htmlFor="agent-code">
+                      2. Paste the code {agent.account} shows you
+                    </label>
+                    <div className="claude-code-row">
+                      <input
+                        id="agent-code"
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder={agent.codeHint}
+                        value={code}
+                        maxLength={4096}
+                        onChange={(event) => setCode(event.target.value)}
+                      />
+                      <button disabled={!code.trim() || !!busy || waiting}>
+                        {busy === 'code' || waiting ? (
+                          <LoaderCircle size={14} className="spinning" />
+                        ) : null}
+                        Sign in
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <small role="status">
+                    <LoaderCircle size={14} className="spinning" /> 2.{' '}
+                    {agent.name} signs in here once you approve.
+                  </small>
+                )}
                 <button
                   type="button"
                   className="text-button"
@@ -359,22 +389,22 @@ export function SpaceSetup({
           </div>
           {ready &&
             !login &&
-            claude &&
-            (claude.connected ? (
+            signin &&
+            (signin.connected ? (
               <button disabled={!!busy} onClick={() => void signOut()}>
                 Sign out
               </button>
             ) : (
-              claude.loginSupported && (
+              signin.loginSupported && (
                 <button
                   className="primary"
                   disabled={!!busy}
                   onClick={() => void signIn()}
                 >
-                  {busy === 'claude' ? (
+                  {busy === 'agent' ? (
                     <LoaderCircle size={14} className="spinning" />
                   ) : null}
-                  Sign in to Claude
+                  Sign in to {agent.account}
                 </button>
               )
             ))}

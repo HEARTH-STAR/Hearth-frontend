@@ -10,7 +10,11 @@
 - A Space is a container (Hearth-backend template `space`, running Hearth-Core on 5010), and each Dot is a Space:
   `POST /api/dots` without a `spaceId` creates the Dot's own Space and starts its container. A Space that is
   home to one Dot carries that Dot's name (`WorkspaceStore.nameSpacesAfterDots`, also on rename and at startup). Its
-  setup is container → Claude Code sign-in → GitHub, both signed in inside the container through its Hearth-Core.
+  setup is container → agent sign-in → GitHub, both signed in inside the container through its Hearth-Core.
+- Each Dot picks its agent when it is made: Claude Code (default), Cursor or Antigravity (`src/shared/agents.ts`,
+  `POST /api/dots` `agent`). It is the Space's (`space_agents` table; Spaces without a row are Claude Code), fixed
+  once its container exists, and sent to Hearth-backend's spin-up as `agent` (it sets Hearth-Core's `AGENT_NAME`).
+  Claude Spaces send no `agent`, so an older Hearth-backend still spins them up.
   A Dot runs in its Space (`dot.spaceId`): chat, files and permissions all go there.
 - The + next to Hearth spins up a new Dot (name only: `POST /api/dots` defaults the instructions to
   `DEFAULT_INSTRUCTIONS` and gives it its own Space and container). The sidebar lists Dots only. A Dot's "…" menu (`DotMenu` in `Sidebar.tsx`) opens its Space's Setup page
@@ -22,7 +26,7 @@
 - Hearth-frontend (this repo, :4310, dev UI :5173). Remotes: `origin` HEARTH-STAR/Hearth-frontend; `upstream`
   CopilotKit/OpenDots, which is never pushed to.
 - Hearth-Core (`../Hearth-Core`, :5010 inside each Space's container): `/api/chat`, `/api/workspace/*`,
-  `/api/connectors/{github,claude-code}/*`, `/health`. Reached at `http://HEARTH_SPACE_HOST:<port>`, the port
+  `/api/connectors/{github,claude-code,cursor,antigravity}/*`, `/health`. Reached at `http://HEARTH_SPACE_HOST:<port>`, the port
   Hearth-backend reports for the container's 5010 (it changes when Docker restarts the container).
 - Hearth-backend (`../Hearth-backend`, :5020) at `HEARTH_BACKEND_URL`: `/api/status/docker`, `POST /api/containers`,
   `GET /api/containers/{name}`, `POST /api/containers/{name}/start`; `HEARTH_BACKEND_TOKEN` must equal its
@@ -69,8 +73,9 @@
   `PATCH /api/dots/:id/computer/permissions` still changes them. There is no Memory feature
   (removed at the owner's request); do not bring OpenDots' memories back.
 - Server code reads configuration only through `config.ts` (`configFromEnv`).
-- GitHub and Claude Code sign-in are per Space: `github-routes.ts` (`/api/spaces/:id/github*`) and
-  `space-routes.ts` (`/api/spaces/:id/claude*`) proxy that Space's Hearth-Core. The app never stores a token or the
+- GitHub and agent sign-in are per Space: `github-routes.ts` (`/api/spaces/:id/github*`) and
+  `space-routes.ts` (`/api/spaces/:id/agent*`, to the Space's agent connector) proxy that Space's Hearth-Core.
+  Claude Code and Antigravity show a code to paste back; Cursor's sign-in finishes on its own and is polled. The app never stores a token or the
   pasted code. Connecting GitHub signs gh in the container out of other github.com accounts, so tests stub it.
 - Styles: `style.css` is the shell (sidebar, chat, computer, dialogs), `editor.css` is Spaces and the editor.
   Dark mode is generated at build time (`src/build/dark-theme.ts`); wrap intentionally dark surfaces in

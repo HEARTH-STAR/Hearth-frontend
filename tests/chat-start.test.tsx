@@ -22,15 +22,20 @@ const dot: Dot = {
   directory: 'dots/scout',
   createdAt: 0,
 };
-const space = (stage: Space['stage'], claude: boolean | null): Space => ({
+const space = (
+  stage: Space['stage'],
+  signedIn: boolean | null,
+  agent: Space['agent'] = 'claude_code',
+): Space => ({
   id: 'space-1',
   name: 'Scout',
   description: '',
   createdAt: 0,
   pageCount: 0,
   container: 'hearth-container-scout',
+  agent,
   stage,
-  claude,
+  signedIn,
 });
 
 // 1. Following the conversation
@@ -143,4 +148,19 @@ it('shows the status and the conversation title under the name', () => {
   const untitled = renderToStaticMarkup(<DotHeader dot={dot} online={false} />);
   expect(untitled).toContain('Needs setup');
   expect(untitled).not.toContain('dot-header-title');
+});
+
+it('names the Dot’s own agent in its setup', () => {
+  expect(setupSteps(space('ready', false, 'cursor'))[1]).toEqual({
+    label: 'Cursor',
+    detail: 'Sign in needed',
+    state: 'todo',
+  });
+  const card = renderToStaticMarkup(
+    <SetupCard dot={dot} space={space('ready', false, 'antigravity')} />,
+  );
+  expect(card).toContain('an Antigravity sign-in');
+  expect(
+    renderToStaticMarkup(<SetupCard dot={dot} space={space('ready', false)} />),
+  ).toContain('a Claude Code sign-in');
 });

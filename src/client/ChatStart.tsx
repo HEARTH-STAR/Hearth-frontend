@@ -11,6 +11,7 @@ import {
 import { Mascot } from './Mascot';
 import { STAGE_LABEL, working } from './space-stage';
 import type { Dot, Space } from '../shared/types';
+import { agentOf } from '../shared/agents';
 // What an empty conversation shows: starting points when the Dot is ready, and the
 // steps left (with a way to finish them) when it is not.
 
@@ -88,13 +89,13 @@ export function setupSteps(space?: Space): {
       state: ready ? 'done' : working(stage) ? 'working' : 'todo',
     },
     {
-      label: 'Claude Code',
+      label: agentOf(space).name,
       detail: !ready
         ? 'Waits for the container'
-        : space?.claude === false
+        : space?.signedIn === false
           ? 'Sign in needed'
           : 'Signed in',
-      state: ready && space?.claude !== false ? 'done' : 'todo',
+      state: ready && space?.signedIn !== false ? 'done' : 'todo',
     },
   ];
 }
@@ -141,8 +142,9 @@ export function SetupCard({
     <section className="setup-card" aria-label={`${dot.name}’s setup`}>
       <h3>Finish setting up {dot.name}</h3>
       <p>
-        {dot.name} needs a running container and a Claude Code sign-in before it
-        can work.
+        {dot.name} needs a running container and{' '}
+        {/^[aeiou]/i.test(agentOf(space).name) ? 'an' : 'a'}{' '}
+        {agentOf(space).name} sign-in before it can work.
       </p>
       <ol>
         {steps.map((step) => (

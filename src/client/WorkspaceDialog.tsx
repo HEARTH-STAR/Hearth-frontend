@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import type { Dot, State, WorkspaceState } from '../shared/types';
+import {
+  AGENT_IDS,
+  AGENTS,
+  DEFAULT_AGENT,
+  agentOf,
+  type AgentId,
+} from '../shared/agents';
 import { STAGE_LABEL } from './space-stage';
 import {
   setThemePreference,
@@ -29,6 +36,7 @@ export function WorkspaceDialog({
     dialog.type === 'settings' ? state.settings.name : '',
   );
   const [paused, setPaused] = useState(state.settings.paused);
+  const [agent, setAgent] = useState<AgentId>(DEFAULT_AGENT);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [theme, setTheme] = useState(themePreference);
@@ -97,9 +105,9 @@ export function WorkspaceDialog({
               method = 'POST',
               body: unknown;
             if (dialog.type === 'dot') {
-              // Its own Space and container; Hearth picks the folder and instructions.
+              // Its own Space and container, running the chosen agent; Hearth picks the folder and instructions.
               path = '/dots';
-              body = { name };
+              body = { name, agent };
             }
             if (dialog.type === 'settings') {
               path = '/settings';
@@ -126,11 +134,31 @@ export function WorkspaceDialog({
             required
           />
           {dialog.type === 'dot' && (
+            <fieldset className="appearance-fields">
+              <legend>Agent</legend>
+              <div className="segmented" role="radiogroup">
+                {AGENT_IDS.map((option) => (
+                  <label key={option}>
+                    <input
+                      type="radio"
+                      name="agent"
+                      value={option}
+                      checked={agent === option}
+                      onChange={() => setAgent(option)}
+                    />
+                    <span>{AGENTS[option].name}</span>
+                  </label>
+                ))}
+              </div>
+              <small className="muted">{AGENTS[agent].blurb}</small>
+            </fieldset>
+          )}
+          {dialog.type === 'dot' && (
             <p className="muted">
               Each Dot runs in its own container: Hearth spins it up through
-              Hearth-backend, then opens its Setup page to sign in to Claude
-              Code and connect GitHub. The first one builds the image, which can
-              take a few minutes.
+              Hearth-backend, then opens its Setup page to sign in to{' '}
+              {AGENTS[agent].name} and connect GitHub. The first one builds the
+              image, which can take a few minutes.
               {backend.reachable && backend.docker !== false
                 ? ''
                 : ` ${backend.reachable ? 'Docker is not running' : 'Hearth-backend is not answering'} right now, so start the container from the Setup page later.`}
@@ -191,10 +219,10 @@ export function WorkspaceDialog({
                     {space.container ? <code>{space.container}</code> : null}{' '}
                     {STAGE_LABEL[space.stage].toLowerCase()}
                     {space.stage === 'ready' &&
-                      (space.claude
-                        ? ', Claude Code signed in'
-                        : space.claude === false
-                          ? ', Claude Code not signed in'
+                      (space.signedIn
+                        ? `, ${agentOf(space).name} signed in`
+                        : space.signedIn === false
+                          ? `, ${agentOf(space).name} not signed in`
                           : '')}
                   </p>
                 ))}

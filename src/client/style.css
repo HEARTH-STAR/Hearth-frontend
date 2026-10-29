@@ -1670,7 +1670,7 @@ body.resizing-cols .code-splitter::after {
   .code-workspace {
     grid-template-rows: none;
     grid-template-columns:
-      minmax(160px, min(var(--tree-width), calc(100% - 226px)))
+      minmax(220px, min(var(--tree-width), calc(100% - 226px)))
       6px minmax(0, 1fr);
   }
   .code-splitter {
