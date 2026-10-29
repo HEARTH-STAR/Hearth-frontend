@@ -7,8 +7,16 @@ export interface BackendContainer {
   image: string;
   /** Docker's status: running, exited, created, … */
   status: string;
-  /** Container port → the 127.0.0.1 port Docker published it on, e.g. ``{"5010": 49153}``. */
+  /**
+   * Container port → the port to reach it on at ``host``: the host port Docker published it on, e.g.
+   * ``{"5010": 49153}``, or on Azure the same port, ``{"5010": 5010}``.
+   */
   ports?: Record<string, number>;
+  /**
+   * Where to reach ``ports``: Hearth-backend's publish host (Docker), or the container group's current private
+   * IP (Azure; null while it has none). Older Hearth-backends leave it out.
+   */
+  host?: string | null;
 }
 export class HearthBackendError extends Error {
   constructor(

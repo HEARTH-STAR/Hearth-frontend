@@ -16,6 +16,7 @@
     "format": "prettier --write src tests *.json *.ts *.js index.html welcome public .github Dockerfile \"compose*.yml\" README.md .env.example --ignore-unknown",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:studio": "node --env-file-if-exists=.env node_modules/drizzle-kit/bin.cjs studio",
     "check-format": "prettier --check src tests *.json *.ts *.js index.html welcome public .github Dockerfile \"compose*.yml\" README.md .env.example --ignore-unknown"
   },
   "keywords": [],

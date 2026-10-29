@@ -252,7 +252,8 @@ export class SpaceService {
         url: null,
         error: `The container does not publish Hearth-Core’s port ${CORE_PORT}; spaces need the “space” template.`,
       };
-    const url = `http://${this.config.spaceHost}:${port}`;
+    // On Azure the container's private IP, which can change when it restarts; HEARTH_SPACE_HOST otherwise.
+    const url = `http://${container.host || this.config.spaceHost}:${port}`;
     try {
       await this.client(url).health(AbortSignal.timeout(PROBE_TIMEOUT_MS));
       return { stage: 'ready', status, url };

@@ -1,11 +1,13 @@
-# The hosted stack on the VPS (README: "Hosting on a VPS"): Postgres and this app. Hearth-backend runs
-# on the host, beside the Docker Engine it drives. Both networks are made once by hand:
+# The hosted stack on the Azure VM (README: "Hosting on Microsoft Azure"; HEARTH-Deploy sets it up):
+# Postgres and this app. Hearth-backend runs on the host and runs each Dot as an Azure container
+# group. Both networks are made once:
 #
 #   docker network create --internal hearth-db                                   # Postgres; no route out
 #   docker network create --subnet 172.30.0.0/24 --gateway 172.30.0.1 hearth     # this app ⇄ the host
 #
-# 172.30.0.1 is the host on the hearth network: Hearth-backend listens there, and publishes each
-# Space's Hearth-Core port there (its HEARTH_PUBLISH_HOST), so neither is on the public interface.
+# 172.30.0.1 is the host on the hearth network: Hearth-backend listens there, not on the public
+# interface. Each Dot's Hearth-Core is reached at its container group's private IP (the `host`
+# Hearth-backend reports), through the VM's network.
 services:
   postgres:
     image: postgres:17

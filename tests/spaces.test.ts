@@ -192,6 +192,30 @@ it('starts a stopped container again, and adopts one a lost answer left behind',
     container: `hearth-container-${space.id}`,
   });
 });
+it('reaches Hearth-Core at the host Hearth-backend reports (an Azure private IP)', async () => {
+  let host = '10.40.1.4';
+  const { app, cores, platform, workspace } = fixture({
+    backend: {
+      [`GET /api/containers/${SPACE_CONTAINER}`]: async () =>
+        Response.json({
+          ...(await runningSpace({ '5010': 5010 }).json()),
+          host,
+        }),
+    },
+  });
+  const everyday = workspace.spaces()[0];
+  expect(
+    await (await app.request(`/api/spaces/${everyday.id}/setup`)).json(),
+  ).toMatchObject({ stage: 'ready', coreUrl: 'http://10.40.1.4:5010' });
+  host = '10.40.1.9'; // a restarted container group can get a new private IP
+  expect(await platform.spaces.probe(everyday.id, true)).toMatchObject({
+    stage: 'ready',
+    url: 'http://10.40.1.9:5010',
+  });
+  expect(cores).toEqual(
+    expect.arrayContaining(['http://10.40.1.4:5010', 'http://10.40.1.9:5010']),
+  );
+});
 it('signs Claude Code in inside the Space through its Hearth-Core', async () => {
   let signedIn = false;
   const { app, core, workspace } = fixture({

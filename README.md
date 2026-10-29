@@ -134,7 +134,7 @@ Every variable is documented in `.env.example`. The ones that matter:
 | `HEARTH_BACKEND_URL`        | `http://127.0.0.1:5020` | Hearth-backend                                           |
 | `HEARTH_BACKEND_TOKEN`      | none                    | Bearer token when Hearth-backend has `HEARTH_API_TOKEN`  |
 | `HEARTH_CONTAINER_TEMPLATE` | `space`                 | Template for Space containers (runs Hearth-Core on 5010) |
-| `HEARTH_SPACE_HOST`         | `127.0.0.1`             | Where this server reaches the ports Spaces publish       |
+| `HEARTH_SPACE_HOST`         | `127.0.0.1`             | Where to reach Spaces when Hearth-backend gives no host  |
 | `HEARTH_MODEL`              | Hearth-Core's default   | Model for conversations                                  |
 | `HOST`, `PORT`              | `127.0.0.1`, `4310`     | Where this server listens                                |
 | `APP_ORIGIN`                | Vite's in development   | The URLs Hearth is opened at; required beyond loopback   |
@@ -211,113 +211,31 @@ production instances alike):
    Content-Security-Policy allows the Clerk host named in the publishable key, so no other change
    is needed.
 
-## Hosting on a VPS (HostVDS)
+## Hosting on Microsoft Azure
 
-Hosted, Hearth runs every user's containers on one VPS: Ubuntu with Docker Engine, Postgres in a
-container, this app in a container, Hearth-backend on the host beside the engine it drives, and a
-reverse proxy for HTTPS. Only ports 22, 80 and 443 face the internet.
+Hosted, HEARTH provides every user's containers: nobody brings a container or installs Docker. Each
+Dot is one Azure Container Instances container group with a private IP only; this app, Postgres
+and Hearth-backend run on one VM in the same virtual network. **HEARTH-Deploy**
+(github.com/HEARTH-STAR, next to this repo) sets it all up from an empty subscription: network,
+storage, registry, identities, the VM, Caddy for HTTPS, and the Clerk settings.
 
 ```
 internet ─443→ Caddy ─→ 127.0.0.1:4310  Hearth-frontend (container; networks hearth + hearth-db)
-                                           ├─→ postgres:5432         hearth-db, internal, no published port
-                                           ├─→ 172.30.0.1:5020       Hearth-backend on the host
-                                           └─→ 172.30.0.1:<port>     each Space's Hearth-Core
+                                           ├─→ postgres:5432          hearth-db, internal, no published port
+                                           ├─→ 172.30.0.1:5020        Hearth-backend on the VM (azure mode)
+                                           └─→ <private IP>:5010      each Dot's Hearth-Core, a container group
+                                                                      in the VNet's containers subnet
 ```
 
-1. **Server.** Make an Ubuntu 24.04 VPS at HostVDS with enough disk for every user's containers
-   (each Space image is a few GB once built), point your domain's DNS at it, and sign in as root.
+This app needs one thing for it: Hearth-backend's answers carry `host`, the container group's
+current private IP, and the app reaches the Dot's Hearth-Core at `http://<host>:5010`. Without
+`host` (an older Hearth-backend) it uses `HEARTH_SPACE_HOST` and the published port, as with Docker
+locally. Deleting a Dot, or `user.deleted`, removes the container group and its file shares; a 404
+counts as already removed.
 
-2. **Docker Engine**, from Docker's apt repository:
-
-   ```bash
-   apt-get update && apt-get install -y ca-certificates curl git
-   install -m 0755 -d /etc/apt/keyrings
-   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-     https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
-     > /etc/apt/sources.list.d/docker.list
-   apt-get update
-   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-   ```
-
-3. **Private networks**, made once (they survive reboots). `hearth-db` is internal: Postgres has no
-   route out and no published port. On `hearth`, `172.30.0.1` is the host:
-
-   ```bash
-   docker network create --internal hearth-db
-   docker network create --subnet 172.30.0.0/24 --gateway 172.30.0.1 hearth
-   ```
-
-4. **Firewall.** Containers on `hearth` reach the host at `172.30.0.1`; nothing else does.
-
-   ```bash
-   ufw allow OpenSSH && ufw allow 80,443/tcp
-   ufw allow from 172.30.0.0/24 to 172.30.0.1
-   ufw enable
-   ```
-
-   Docker's published ports skip ufw, which is why nothing here publishes on the public address:
-   the app on `127.0.0.1`, the Spaces on `172.30.0.1`.
-
-5. **Hearth-backend** on the host (it runs the `docker` CLI). Clone it (it is private: use a deploy
-   key) and install it as a service:
-
-   ```bash
-   useradd --system --create-home --groups docker hearth
-   sudo -iu hearth git clone git@github.com:HEARTH-STAR/Hearth-backend.git
-   sudo -iu hearth bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh && cd Hearth-backend && ~/.local/bin/uv venv venv && ~/.local/bin/uv pip install --python venv/bin/python -r requirements.txt'
-   openssl rand -hex 32   # the token, for both sides
-   cat > /etc/hearth-backend.env <<'EOF'
-   HOST=172.30.0.1
-   PORT=5020
-   HEARTH_API_TOKEN=<the token>
-   HEARTH_PUBLISH_HOST=172.30.0.1
-   EOF
-   chmod 600 /etc/hearth-backend.env
-   cat > /etc/systemd/system/hearth-backend.service <<'EOF'
-   [Unit]
-   After=docker.service
-   Requires=docker.service
-   [Service]
-   User=hearth
-   WorkingDirectory=/home/hearth/Hearth-backend
-   EnvironmentFile=/etc/hearth-backend.env
-   ExecStart=/home/hearth/Hearth-backend/venv/bin/python server.py
-   Restart=always
-   [Install]
-   WantedBy=multi-user.target
-   EOF
-   systemctl enable --now hearth-backend
-   ```
-
-   The `docker` group is root on the host in all but name: keep this user for Hearth-backend only.
-
-6. **Postgres and this app** (`compose.yml`). In a checkout of Hearth-frontend, write `.env`:
-
-   ```bash
-   APP_ORIGIN=https://hearth.example.com
-   POSTGRES_PASSWORD=<openssl rand -hex 24>   # hex: it goes into DATABASE_URL as is
-   CLERK_PUBLISHABLE_KEY=pk_live_…
-   CLERK_SECRET_KEY=sk_live_…
-   CLERK_WEBHOOK_SECRET=whsec_…
-   HEARTH_BACKEND_TOKEN=<the token from step 5>
-   ```
-
-   then `docker compose up -d --build`. Postgres keeps its data in the `hearth-postgres` volume;
-   the app applies `drizzle/` at start, then listens on `127.0.0.1:4310`. Its `DATABASE_URL` is
-   `postgres://hearth:<password>@postgres:5432/hearth`, resolved on `hearth-db`. Back up with
-   `docker compose exec postgres pg_dump -U hearth hearth > hearth.sql`.
-
-7. **HTTPS.** Install Caddy (`apt-get install -y caddy`) and give `/etc/caddy/Caddyfile`
-   `hearth.example.com { reverse_proxy 127.0.0.1:4310 }`, then `systemctl reload caddy`. It gets
-   the certificate and passes the terminal's WebSocket through.
-
-8. **Clerk**: the production instance as in [Clerk: username and password](#clerk-username-and-password),
-   with the webhook at `https://hearth.example.com/api/webhooks/clerk`.
-
-Updating: `git pull && docker compose up -d --build` here, `git pull && systemctl restart
-hearth-backend` there. Running Spaces keep going: they are Hearth-backend's containers, not the
-app's.
+`compose.yml` runs this app and Postgres on the VM as before; HEARTH-Deploy's `deploy.sh vm` starts
+it with the env file it writes (`APP_ORIGIN`, `POSTGRES_PASSWORD`, the three `CLERK_*` values and
+`HEARTH_BACKEND_TOKEN`).
 
 ## Development
 
@@ -331,6 +249,10 @@ npm run build
 
 CI (`.github/workflows/ci.yml`) runs all five. After changing `src/server/db/schema.ts`, run
 `npm run db:generate` and commit the new file in `drizzle/`; the server applies it at its next start.
+
+To look at the Postgres tables (`users`, `dots`, `sign_ins`), run `npm run db:studio` and open
+https://local.drizzle.studio. It is Drizzle Studio on this machine, reading the database in `.env`'s
+`DATABASE_URL`; Ctrl+C stops it.
 
 ## License
 
