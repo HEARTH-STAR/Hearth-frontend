@@ -113,6 +113,11 @@ code {
   font-family: var(--mono);
   font-size: 0.92em;
 }
+/* Clerk's sign-in and user menu (every element has a cl- class) keep Clerk's own colors: the dark
+   twins of the global button and input rules would outrank its class styles. */
+/* theme: fixed [class^='cl-'] */
+/* theme: fixed [class*=' cl-'] */
+/* theme: end */
 .icon-button {
   border: 0;
   padding: 7px;
@@ -440,10 +445,6 @@ code {
   flex-direction: column;
   gap: 2px;
   padding-top: 10px;
-}
-.sidebar-account {
-  display: flex;
-  padding: 6px 8px;
 }
 
 /* Banners */
@@ -2212,6 +2213,42 @@ body.resizing-cols .code-splitter::after {
   font-size: 12px;
   font-weight: 600;
 }
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.account-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 13px;
+}
+.account-text strong {
+  font-weight: 550;
+}
+.account-text small {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.account-actions button {
+  font-size: 12.5px;
+  padding: 6px 10px;
+}
 .segmented {
   display: inline-flex;
   padding: 3px;
@@ -2244,37 +2281,6 @@ body.resizing-cols .code-splitter::after {
 .segmented input:focus-visible + span {
   outline: 2px solid #9aa6e8;
   outline-offset: 1px;
-}
-.config-note {
-  margin: 20px 0 0;
-  padding: 12px 14px;
-  border: 1px solid #eceae5;
-  border-radius: 10px;
-  background: #f5f4f1;
-}
-.config-note strong {
-  font-size: 12px;
-  font-weight: 600;
-  color: #55575f;
-}
-.config-note p {
-  margin: 7px 0 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: #6b6d75;
-  overflow-wrap: anywhere;
-}
-.online-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: #45b08c;
-  vertical-align: 1px;
-}
-.online-dot.off {
-  background: #c79b6b;
 }
 .unlock {
   max-width: 380px;

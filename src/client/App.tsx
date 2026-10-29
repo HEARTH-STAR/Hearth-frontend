@@ -7,7 +7,7 @@ import {
   useState,
   type CSSProperties,
 } from 'react';
-import { SignIn, UserButton, useAuth } from '@clerk/react';
+import { SignIn, useAuth } from '@clerk/react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
 import { Menu, Monitor, SquarePen, X } from 'lucide-react';
 import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
@@ -31,6 +31,7 @@ import { ConversationMenu } from './ConversationMenu';
 import { DotHeader } from './DotHeader';
 import { latestConversation, Sidebar } from './Sidebar';
 import { WorkspaceDialog, type Dialog } from './WorkspaceDialog';
+import { AccountSettings } from './AccountSettings';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -325,7 +326,6 @@ export function App() {
           onSetup={openSetup}
           onPages={(id) => openPage(id)}
           onSettings={() => setDialog({ type: 'settings' })}
-          account={<UserButton showName />}
         />
         <div className="main">
           {error && (
@@ -464,6 +464,7 @@ export function App() {
             onClose={() => setDialog(undefined)}
             onDotCreated={(created) => openSetup(created.spaceId)}
             mutate={mutate}
+            account={<AccountSettings onClose={() => setDialog(undefined)} />}
           />
         )}
       </div>

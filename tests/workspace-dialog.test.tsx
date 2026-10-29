@@ -43,3 +43,19 @@ it('keeps the settings dialog free of the agent picker', () => {
   );
   expect(html).not.toContain('<legend>Agent</legend>');
 });
+
+it('shows the Account section in Settings only', () => {
+  const render = (type: 'dot' | 'settings') =>
+    renderToStaticMarkup(
+      <WorkspaceDialog
+        dialog={{ type }}
+        state={{ settings: { name: 'Sagar', paused: false } }}
+        workspace={workspace}
+        onClose={() => {}}
+        mutate={async () => false}
+        account={<p>account section</p>}
+      />,
+    );
+  expect(render('settings')).toContain('account section');
+  expect(render('dot')).not.toContain('account section');
+});
