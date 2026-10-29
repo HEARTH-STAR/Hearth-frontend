@@ -106,6 +106,27 @@ export function workspaceRoutes(platform: Platform) {
       201,
     );
   });
+  app.patch('/conversations/:id', async (c) => {
+    const data = z
+      .object({ title: z.string().trim().min(1).max(120) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success)
+      return c.json({ error: 'Give the conversation a title.' }, 400);
+    return c.json(
+      platform.renameConversation(c.req.param('id'), data.data.title),
+    );
+  });
+  app.delete('/conversations/:id', (c) => {
+    platform.deleteConversation(c.req.param('id'));
+    return c.json({ ok: true });
+  });
+  /** When each turn was asked and answered, for the times shown on messages. */
+  app.get('/conversations/:id/times', (c) => {
+    const id = c.req.param('id');
+    platform.workspace.requireThread(id);
+    return c.json(platform.workspace.turnTimes(id));
+  });
   app.all('/copilotkit/*', (c) => platform.handle(c.req.raw));
   app.onError((error, c) => {
     const text = error.message;
@@ -115,6 +136,11 @@ export function workspaceRoutes(platform: Platform) {
     // server fault.
     if (/^(Dot not found|Conversation does not belong)/.test(text))
       return c.json({ error: text }, 404);
+    // A conversation that cannot be deleted right now (running, or a page's own).
+    if (
+      /^(This conversation is still running|A page’s conversation)/.test(text)
+    )
+      return c.json({ error: text }, 409);
     console.error('Workspace request failed:', error);
     return c.json(
       { error: 'The request failed. Check the server log and try again.' },

@@ -2355,3 +2355,191 @@ body.resizing-cols .code-splitter::after {
     animation: none;
   }
 }
+
+/* Under each message, on hover: when it was sent, and Copy (ChatTranscript.tsx). */
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  margin-top: -6px;
+  font-size: 11.5px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.message-meta.user {
+  align-self: flex-end;
+}
+.chat-bubble:hover + .message-meta,
+.message-meta:hover,
+.message-meta:focus-within {
+  opacity: 1;
+}
+.message-copy {
+  gap: 4px;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.message-copy:hover:not(:disabled) {
+  background: #efede9;
+  color: var(--ink);
+}
+@media (hover: none) {
+  .message-meta {
+    opacity: 1;
+  }
+}
+
+/* How long the Dot has been working. */
+.thinking-time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The line under the composer: how to send, or Esc to stop; a count near the limit. */
+.composer-hint {
+  max-width: 640px;
+  margin: 6px auto 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.composer-count {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .composer-hint > span:first-child {
+    display: none;
+  }
+}
+
+/* A turn's error in plain words, with Retry and the original text on request (chat-errors.ts). */
+.chat-error.friendly {
+  align-items: flex-start;
+}
+.chat-error-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.chat-error-text strong {
+  font-weight: 600;
+}
+.chat-error-text pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #f6e3de;
+  color: #7a3c2f;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-error-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.chat-error-actions .text-button {
+  color: #9a4b3c;
+}
+.chat-error-actions a.button {
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+/* Rename and delete in the conversations menu (ConversationMenu.tsx). */
+.conversation-popover {
+  width: 320px;
+}
+.conversation-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 9px;
+}
+.conversation-row.active {
+  background: var(--lavender);
+}
+.menu-popover .conversation-row .conversation-open {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+}
+.conversation-action {
+  padding: 5px;
+  opacity: 0;
+}
+.conversation-row:hover .conversation-action,
+.conversation-row:focus-within .conversation-action {
+  opacity: 1;
+}
+.conversation-row.editing,
+.conversation-row.confirming {
+  flex-wrap: wrap;
+  padding: 4px 6px;
+}
+.conversation-row.editing input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  font-size: 13px;
+}
+.conversation-row.confirming span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-popover .conversation-row .danger {
+  width: auto;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: #b4442f;
+  color: #ffffff;
+  font-size: 12px;
+}
+.menu-popover .conversation-row .danger:hover:not(:disabled) {
+  background: #963624;
+}
+.conversation-row-error {
+  flex-basis: 100%;
+  margin: 4px 2px 0;
+  color: #9a4b3c;
+  font-size: 12px;
+}
+@media (hover: none) {
+  .conversation-action {
+    opacity: 1;
+  }
+}
+
+/* "Save as a page" (SavePageDialog.tsx). */
+.save-page-dialog {
+  max-width: 440px;
+}
+.save-page-dialog > .muted {
+  margin: 0 0 16px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}

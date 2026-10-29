@@ -6,11 +6,15 @@ import type { Page } from '../server/pages';
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
   type Ref,
 } from 'react';
+import { agentOf } from '../shared/agents';
+import { describeError, elapsed } from './chat-errors';
+import { SavePageDialog } from './SavePageDialog';
 import type { WorkspaceListing } from '../shared/computer-types';
 import { dotFiles, insertReference } from './file-reference';
 import { FilePicker } from './FilePicker';
@@ -28,15 +32,17 @@ import {
   Monitor,
   Plus,
   Square,
+  X,
 } from 'lucide-react';
 import { ToolRow, type ToolRenderProps } from './ToolRow';
-import { ChatTranscript } from './ChatTranscript';
+import { ChatTranscript, messageTimes } from './ChatTranscript';
 import type { Conversation, Dot, Space } from '../shared/types';
 import { DotHeader } from './DotHeader';
 import { shouldSubmitComposerOnKeyDown } from './chat-composer';
 import { useStickToBottom } from './chat-scroll';
 import {
   ChatStart,
+  composerHint,
   composerPlaceholder,
   focusBlank,
   SetupCard,
@@ -112,6 +118,18 @@ export function Chat({
   const [loaded, setLoaded] = useState(false);
   const [running, setRunning] = useState(false);
   const [activity, setActivity] = useState('');
+  const [showDetails, setShowDetails] = useState(false);
+  const [savingPage, setSavingPage] = useState(false);
+  /** The owner's last message as typed, so Retry sends it again exactly. */
+  const lastSent = useRef('');
+  const [turns, setTurns] = useState<{ asked: number; replied?: number }[]>([]);
+  const loadTimes = useCallback(() => {
+    void api<{ asked: number; replied?: number }[]>(
+      `/conversations/${thread.id}/times`,
+    )
+      .then(setTurns)
+      .catch(() => {});
+  }, [thread.id]);
   const sent = useRef(false);
   const { scroller, content, away, jump } = useStickToBottom();
   const input = useRef<HTMLTextAreaElement>(null);
@@ -124,6 +142,8 @@ export function Chat({
   };
   const finished = useRef(onTurnFinished);
   finished.current = onTurnFinished;
+  const timesChanged = useRef(loadTimes);
+  timesChanged.current = loadTimes;
   // Connecting replays the conversation, including errors of earlier turns; only new ones show.
   const live = useRef(false);
   useEffect(() => {
@@ -145,6 +165,7 @@ export function Chat({
       onRunFinalized: () => {
         setActivity('');
         finished.current?.();
+        timesChanged.current?.();
       },
     });
     return () => {
@@ -160,7 +181,10 @@ export function Chat({
       .connectAgent({ agent })
       .then(() => {
         live.current = true;
-        if (active) setLoaded(true);
+        if (active) {
+          setLoaded(true);
+          loadTimes();
+        }
       })
       .catch((e) => {
         if (active)
@@ -171,10 +195,12 @@ export function Chat({
     return () => {
       active = false;
     };
-  }, [agent, copilotkit, isReady]);
+  }, [agent, copilotkit, isReady, loadTimes]);
   const send = async (text: string) => {
     if (!text.trim() || running || !loaded || !contextReady || paused) return;
     setError('');
+    setShowDetails(false);
+    lastSent.current = text;
     setRunning(true);
     agent.addMessage({
       id: crypto.randomUUID(),
@@ -221,6 +247,22 @@ export function Chat({
     [thread.id, spaces, onSaved],
   );
   const working = running || agent.isRunning;
+  const stop = useCallback(
+    () => copilotkit.stopAgent({ agent }),
+    [copilotkit, agent],
+  );
+  const seconds = useWorkingSeconds(working && agent.isRunning);
+  // Escape stops a running reply, unless it is closing a menu, the file picker or a dialog.
+  useEffect(() => {
+    if (!working) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (document.querySelector('[role="menu"], [role="dialog"]')) return;
+      stop();
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [working, stop]);
   useRenderTool(
     {
       name: '*',
@@ -231,10 +273,11 @@ export function Chat({
             directory={dot.directory}
             running={agent.isRunning}
             onOpenFile={onOpenFile}
+            dotName={dot.name}
           />
         ),
     },
-    [dot.directory, agent.isRunning, onOpenFile],
+    [dot.directory, dot.name, agent.isRunning, onOpenFile],
   );
   const visible = agent.messages.filter(
     (message) =>
@@ -242,6 +285,16 @@ export function Chat({
       ((typeof message.content === 'string' && message.content.trim()) ||
         (message.role === 'assistant' && message.toolCalls?.length)),
   );
+  const times = useMemo(() => messageTimes(visible, turns), [visible, turns]);
+  /** What Retry sends: the last message as typed here, else the last one in the conversation. */
+  const retryText =
+    lastSent.current ||
+    String(
+      visible.findLast((message) => message.role === 'user')?.content ?? '',
+    );
+  const problem = error
+    ? describeError(error, { dot: dot.name, agent: agentOf(space).name })
+    : undefined;
   return (
     <div className="chat">
       <DotHeader
@@ -256,22 +309,7 @@ export function Chat({
           aria-label="Save conversation as page"
           title="Save conversation as page"
           disabled={working}
-          onClick={async () => {
-            const title = window.prompt('Page title', thread.title);
-            if (!title) return;
-            try {
-              const page = await api<Page>(
-                `/conversations/${thread.id}/page`,
-                'POST',
-                { title },
-              );
-              location.hash = `/spaces/${page.spaceId}/pages/${page.id}`;
-            } catch (e) {
-              setError(
-                e instanceof Error ? e.message : 'Could not save conversation.',
-              );
-            }
-          }}
+          onClick={() => setSavingPage(true)}
         >
           <FilePlus size={17} />
         </button>
@@ -308,6 +346,7 @@ export function Chat({
           )}
           <ChatTranscript
             messages={visible}
+            times={times}
             renderTools={(message) => (
               <CopilotChatToolCallsView
                 message={message}
@@ -322,6 +361,7 @@ export function Chat({
               <span />
               <span>
                 {dot.name} is {activity || 'thinking'}
+                <span className="thinking-time"> · {elapsed(seconds)}</span>
               </span>
             </div>
           )}
@@ -344,20 +384,55 @@ export function Chat({
             </button>
           </div>
         )}
-        {error && (
-          <div className="chat-error" role="alert">
-            {error}
-            <button
-              onClick={() => {
-                setError('');
-                void copilotkit
-                  .connectAgent({ agent })
-                  .then(() => setLoaded(true))
-                  .catch((e) => setError(e.message));
-              }}
-            >
-              Reconnect
-            </button>
+        {problem && (
+          <div className="chat-error friendly" role="alert">
+            <div className="chat-error-text">
+              <strong>{problem.title}</strong>
+              {problem.hint && <span>{problem.hint}</span>}
+              {showDetails && <pre>{problem.detail}</pre>}
+            </div>
+            <div className="chat-error-actions">
+              {loaded && retryText.trim() && !working && (
+                <button
+                  className="primary"
+                  onClick={() => void send(retryText)}
+                >
+                  Retry
+                </button>
+              )}
+              {!loaded && (
+                <button
+                  onClick={() => {
+                    setError('');
+                    void copilotkit
+                      .connectAgent({ agent })
+                      .then(() => setLoaded(true))
+                      .catch((e) => setError(e.message));
+                  }}
+                >
+                  Reconnect
+                </button>
+              )}
+              {problem.setup && (
+                <a className="button" href={`#/spaces/${dot.spaceId}/setup`}>
+                  Open Setup
+                </a>
+              )}
+              <button
+                className="text-button"
+                aria-expanded={showDetails}
+                onClick={() => setShowDetails(!showDetails)}
+              >
+                {showDetails ? 'Hide details' : 'Show details'}
+              </button>
+              <button
+                className="icon-button"
+                aria-label="Dismiss error"
+                onClick={() => setError('')}
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
         )}
         <Composer
@@ -372,15 +447,48 @@ export function Chat({
           })}
           disabled={!loaded || !contextReady || paused || !online}
           running={working}
-          onStop={() => copilotkit.stopAgent({ agent })}
+          onStop={stop}
           onSubmit={() => void send(draft)}
           name={dot.name}
           loadFiles={loadFiles}
           onOpenFiles={onComputer}
         />
       </div>
+      {savingPage && (
+        <SavePageDialog
+          initialTitle={thread.title}
+          onClose={() => setSavingPage(false)}
+          onSave={async (title) => {
+            const page = await api<Page>(
+              `/conversations/${thread.id}/page`,
+              'POST',
+              { title },
+            );
+            setSavingPage(false);
+            location.hash = `/spaces/${page.spaceId}/pages/${page.id}`;
+          }}
+        />
+      )}
     </div>
   );
+}
+
+/** Whole seconds since ``active`` turned true, ticking once a second; 0 when not active. */
+function useWorkingSeconds(active: boolean) {
+  const [startedAt, setStartedAt] = useState<number>();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) {
+      setStartedAt(undefined);
+      return;
+    }
+    const start = Date.now();
+    setStartedAt(start);
+    setNow(start);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return startedAt === undefined ? 0 : (now - startedAt) / 1000;
 }
 /** The Dot's files for the composer's "+", relative to its folder. Stable per Dot. */
 export function useDotFiles(dot: Dot | undefined) {
@@ -454,70 +562,82 @@ export function Composer({
     });
   };
   const off = disabled && !running;
+  const limit = 8000;
   return (
-    <form
-      className="composer"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (value.trim() && !disabled && !running) onSubmit();
-      }}
-    >
-      {picking && loadFiles && (
-        <FilePicker
-          name={name}
-          load={loadFiles}
-          onPick={pick}
-          onClose={closePicker}
-          onOpenFiles={onOpenFiles}
-        />
-      )}
-      {(loadFiles || onOpenFiles) && (
-        <button
-          type="button"
-          className={`composer-plus ${picking ? 'active' : ''}`}
-          aria-label={loadFiles ? 'Reference a file' : 'Open the Files panel'}
-          aria-expanded={loadFiles ? picking : undefined}
-          title={loadFiles ? 'Reference a file' : 'Files'}
-          disabled={off}
-          onClick={() => (loadFiles ? setPicking(!picking) : onOpenFiles?.())}
-        >
-          <Plus size={18} />
-        </button>
-      )}
-      <textarea
-        ref={setInput}
-        aria-label="Message"
-        placeholder={placeholder}
-        rows={1}
-        value={value}
-        maxLength={8000}
-        disabled={disabled && !running}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (shouldSubmitComposerOnKeyDown(e)) {
-            e.preventDefault();
-            e.currentTarget.form?.requestSubmit();
-          }
+    <>
+      <form
+        className="composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (value.trim() && !disabled && !running) onSubmit();
         }}
-      />
-      {running && onStop ? (
-        <button
-          type="button"
-          className="send-button"
-          aria-label="Stop response"
-          onClick={onStop}
-        >
-          <Square size={13} />
-        </button>
-      ) : (
-        <button
-          className="send-button"
-          aria-label="Send message"
-          disabled={!value.trim() || disabled}
-        >
-          <ArrowUp size={17} />
-        </button>
-      )}
-    </form>
+      >
+        {picking && loadFiles && (
+          <FilePicker
+            name={name}
+            load={loadFiles}
+            onPick={pick}
+            onClose={closePicker}
+            onOpenFiles={onOpenFiles}
+          />
+        )}
+        {(loadFiles || onOpenFiles) && (
+          <button
+            type="button"
+            className={`composer-plus ${picking ? 'active' : ''}`}
+            aria-label={loadFiles ? 'Reference a file' : 'Open the Files panel'}
+            aria-expanded={loadFiles ? picking : undefined}
+            title={loadFiles ? 'Reference a file' : 'Files'}
+            disabled={off}
+            onClick={() => (loadFiles ? setPicking(!picking) : onOpenFiles?.())}
+          >
+            <Plus size={18} />
+          </button>
+        )}
+        <textarea
+          ref={setInput}
+          aria-label="Message"
+          aria-describedby="composer-hint"
+          placeholder={placeholder}
+          rows={1}
+          value={value}
+          maxLength={limit}
+          disabled={disabled && !running}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (shouldSubmitComposerOnKeyDown(e)) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+        />
+        {running && onStop ? (
+          <button
+            type="button"
+            className="send-button"
+            aria-label="Stop response"
+            onClick={onStop}
+          >
+            <Square size={13} />
+          </button>
+        ) : (
+          <button
+            className="send-button"
+            aria-label="Send message"
+            disabled={!value.trim() || disabled}
+          >
+            <ArrowUp size={17} />
+          </button>
+        )}
+      </form>
+      <p className="composer-hint" id="composer-hint">
+        <span>{composerHint({ running, files: !!loadFiles })}</span>
+        {value.length > limit - 1000 && (
+          <span className="composer-count">
+            {value.length.toLocaleString()} / {limit.toLocaleString()}
+          </span>
+        )}
+      </p>
+    </>
   );
 }
