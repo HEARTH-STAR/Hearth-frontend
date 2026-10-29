@@ -268,3 +268,41 @@ describe('conversations menu (#8)', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('a little life in the app', () => {
+  it('marks a finished tool step as done, a running one not yet', () => {
+    const row = (result?: string) =>
+      renderToStaticMarkup(
+        <ToolRow
+          name="Read"
+          toolCallId="t"
+          status="complete"
+          args={{ file_path: 'dots/dora/a.md' }}
+          result={result}
+          directory="dots/dora"
+          running
+        />,
+      );
+    expect(row('{"ok":true}')).toContain('class="tool-row done"');
+    expect(row(undefined)).not.toContain('done');
+  });
+
+  it('puts the turning ring on a working Dot’s avatar only', async () => {
+    const { DotHeader } = await import('../src/client/DotHeader');
+    const dot = {
+      id: 'd',
+      spaceId: 's',
+      spaceIds: ['s'],
+      name: 'Dora',
+      instructions: '',
+      directory: 'dots/dora',
+      createdAt: 0,
+    };
+    const working = renderToStaticMarkup(
+      <DotHeader dot={dot} online state="working" />,
+    );
+    expect(working).toMatch(/class="dot-avatar online working"/);
+    const idle = renderToStaticMarkup(<DotHeader dot={dot} online />);
+    expect(idle).not.toContain('working"');
+  });
+});

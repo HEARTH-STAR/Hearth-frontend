@@ -29,7 +29,9 @@ export function DotHeader({
   const status = dotStatus(state, online);
   return (
     <header className="dot-header">
-      <span className={`dot-avatar ${online ? 'online' : ''}`}>
+      <span
+        className={`dot-avatar ${online ? 'online' : ''} ${state === 'working' ? 'working' : ''}`}
+      >
         <Mascot identity={dot.id} name={dot.name} small state={state} />
       </span>
       <div className="dot-header-text">

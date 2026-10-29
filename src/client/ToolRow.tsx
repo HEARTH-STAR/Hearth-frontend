@@ -227,7 +227,7 @@ export function ToolRow({
   );
   return (
     <div
-      className={`tool-row ${view.problem ? 'failed' : ''}`}
+      className={`tool-row ${view.problem ? 'failed' : done ? 'done' : ''}`}
       aria-label={`${view.verb} ${view.target}`.trim()}
     >
       {view.output && done ? (

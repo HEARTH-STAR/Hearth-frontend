@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import type React from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Boxes,
   FileText,
@@ -12,6 +13,35 @@ import { WELCOME_URL } from './landing-link';
 import { STAGE_LABEL, working } from './space-stage';
 import type { Conversation, Dot, Space, WorkspaceState } from '../shared/types';
 import { agentOf } from '../shared/agents';
+/**
+ * Where the active Dot's row sits in the list (``top`` and ``height``, in pixels), so one
+ * highlight can glide between rows. Undefined until measured, or when no row is active or
+ * visible: the row then keeps its own background. ``layout`` changes whenever the rows do.
+ */
+function useRowHighlight(
+  list: React.RefObject<HTMLElement | null>,
+  activeDot: string | undefined,
+  layout: string,
+) {
+  const [place, setPlace] = useState<{ top: number; height: number }>();
+  useLayoutEffect(() => {
+    const measure = () => {
+      const row = activeDot
+        ? list.current?.querySelector<HTMLElement>(
+            `[data-dot-id="${CSS.escape(activeDot)}"]`,
+          )
+        : null;
+      setPlace(
+        row ? { top: row.offsetTop, height: row.offsetHeight } : undefined,
+      );
+    };
+    if (typeof window === 'undefined' || !list.current) return;
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [list, activeDot, layout]);
+  return place;
+}
 /** One word for a Space's state: ready, on its way, or waiting for setup. */
 export function spaceHealth(space: Space) {
   if (space.stage === 'ready')
@@ -149,6 +179,14 @@ export function Sidebar({
         dot.name.toLowerCase().includes(query) ||
         latest?.preview.toLowerCase().includes(query),
     );
+  const nav = useRef<HTMLElement>(null);
+  const highlight = useRowHighlight(
+    nav,
+    activeDot,
+    dots
+      .map(({ dot, latest }) => `${dot.id}:${latest?.preview ?? ''}`)
+      .join('|'),
+  );
   return (
     <aside id="workspace-sidebar" className={`sidebar ${open ? 'open' : ''}`}>
       <div className="brand-row">
@@ -180,7 +218,22 @@ export function Sidebar({
           onChange={(event) => onSearch(event.target.value)}
         />
       </label>
-      <nav className="sidebar-scroll" aria-label="Workspace">
+      <nav
+        className={`sidebar-scroll ${highlight ? 'has-highlight' : ''}`}
+        aria-label="Workspace"
+        ref={nav}
+      >
+        {/* The active Dot's background, one shape that glides from row to row. */}
+        {highlight && (
+          <span
+            className="dot-highlight"
+            aria-hidden="true"
+            style={{
+              transform: `translateY(${highlight.top}px)`,
+              height: highlight.height,
+            }}
+          />
+        )}
         <div className="nav-label">
           DOTS
           <button
@@ -194,6 +247,7 @@ export function Sidebar({
         {dots.map(({ dot, latest }) => (
           <div
             key={dot.id}
+            data-dot-id={dot.id}
             className={`dot-row ${activeDot === dot.id ? 'active' : ''}`}
           >
             <button
