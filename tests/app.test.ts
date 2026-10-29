@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveAppOrigins } from '../src/server/app-origin.js';
-import { fixture as base, json, SPACE_CONTAINER } from './helpers.js';
+import {
+  as,
+  fixture as base,
+  json,
+  OWNER,
+  SPACE_CONTAINER,
+} from './helpers.js';
 const open: { close(): void }[] = [];
-function fixture(token?: string, origin?: string | string[]) {
-  const value = base({ ownerToken: token, origin });
+function fixture(origin?: string | string[]) {
+  const value = base({ origin });
   open.push(value);
   return value;
 }
@@ -19,16 +25,24 @@ const write = (origin: string, extra: Record<string, string> = {}) => ({
   },
 });
 describe('API boundaries', () => {
-  it('requires owner token for state and mutations when configured', async () => {
-    const { app } = fixture('private-token');
-    expect((await app.request('/api/state')).status).toBe(401);
+  it('requires a Clerk session for state and mutations', async () => {
+    const { app } = fixture();
+    const signedOut = await app.request('/api/state', as(''));
+    expect(signedOut.status).toBe(401);
+    expect(await signedOut.json()).toEqual({ error: 'Sign in to use Hearth.' });
+    expect((await app.request('/api/workspace', as(''))).status).toBe(401);
     expect(
-      (
-        await app.request('/api/state', {
-          headers: { Authorization: 'Bearer private-token' },
-        })
-      ).status,
-    ).toBe(200);
+      (await app.request('/api/settings', as('', json({}, 'PATCH')))).status,
+    ).toBe(401);
+    expect((await app.request('/api/state')).status).toBe(200);
+  });
+  it('answers the Clerk publishable key without a session', async () => {
+    const { app } = fixture();
+    const response = await app.request('/api/auth/config', as(''));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      publishableKey: 'pk_test_Y2xlcmsuZXhhbXBsZS5jb20k',
+    });
   });
   it('blocks browser cross-origin requests and form posts', async () => {
     const { app } = fixture();
@@ -48,10 +62,7 @@ describe('API boundaries', () => {
   it.each(['http://localhost:5173', 'http://127.0.0.1:5173'])(
     'allows a same-origin Vite proxy mutation from %s',
     async (origin) => {
-      const { app } = fixture(
-        undefined,
-        resolveAppOrigins(undefined, 'development'),
-      );
+      const { app } = fixture(resolveAppOrigins(undefined, 'development'));
       const response = await app.request(
         `${origin}/api/settings`,
         write(origin),
@@ -66,10 +77,7 @@ describe('API boundaries', () => {
   ])(
     'rejects an unlisted origin %s with multiple origins configured',
     async (origin) => {
-      const { app } = fixture(
-        undefined,
-        resolveAppOrigins(undefined, 'development'),
-      );
+      const { app } = fixture(resolveAppOrigins(undefined, 'development'));
       const response = await app.request(
         'http://localhost:5173/api/settings',
         write(origin),
@@ -81,10 +89,7 @@ describe('API boundaries', () => {
     },
   );
   it('rejects cross-site requests even from a configured origin', async () => {
-    const { app } = fixture(
-      undefined,
-      resolveAppOrigins(undefined, 'development'),
-    );
+    const { app } = fixture(resolveAppOrigins(undefined, 'development'));
     const response = await app.request(
       'http://127.0.0.1:4310/api/settings',
       write('http://localhost:5173', { 'Sec-Fetch-Site': 'cross-site' }),
@@ -95,7 +100,7 @@ describe('API boundaries', () => {
     });
   });
   it('preserves exact matching for a single configured origin', async () => {
-    const { app } = fixture(undefined, 'http://localhost:5173');
+    const { app } = fixture('http://localhost:5173');
     for (const [origin, status] of [
       ['http://localhost:5173', 200],
       ['http://127.0.0.1:5173', 403],
@@ -108,30 +113,23 @@ describe('API boundaries', () => {
     }
   });
   it.each(['http://localhost:5173', 'http://127.0.0.1:5173'])(
-    'requires owner authentication for an allowed origin %s',
+    'requires a Clerk session for an allowed origin %s',
     async (origin) => {
-      const { app } = fixture(
-        'private-token',
-        resolveAppOrigins(undefined, 'development'),
-      );
-      for (const [authorization, status] of [
-        [undefined, 401],
-        ['Bearer wrong-token', 401],
-        ['Bearer private-token', 200],
+      const { app } = fixture(resolveAppOrigins(undefined, 'development'));
+      for (const [user, status] of [
+        ['', 401],
+        [OWNER, 200],
       ] as const) {
         const response = await app.request(
           `${origin}/api/settings`,
-          write(origin, authorization ? { Authorization: authorization } : {}),
+          write(origin, { 'X-Test-User': user }),
         );
         expect(response.status).toBe(status);
       }
     },
   );
   it('rejects unrecognized hosts even when the origin is explicitly allowed', async () => {
-    const { app } = fixture(
-      undefined,
-      resolveAppOrigins(undefined, 'development'),
-    );
+    const { app } = fixture(resolveAppOrigins(undefined, 'development'));
     const response = await app.request(
       'http://attacker.example/api/settings',
       write('http://localhost:5173'),
@@ -140,7 +138,7 @@ describe('API boundaries', () => {
     expect(await response.json()).toEqual({ error: 'Unrecognized host.' });
   });
   it('does not widen access when an explicit origin list contains only blank entries', async () => {
-    const { app } = fixture(undefined, resolveAppOrigins(' , ', 'development'));
+    const { app } = fixture(resolveAppOrigins(' , ', 'development'));
     const response = await app.request(
       'http://localhost:5173/api/settings',
       write('http://localhost:5173'),
@@ -148,10 +146,7 @@ describe('API boundaries', () => {
     expect(response.status).toBe(403);
   });
   it('requires the request URL origin by default in production', async () => {
-    const { app } = fixture(
-      undefined,
-      resolveAppOrigins(undefined, 'production'),
-    );
+    const { app } = fixture(resolveAppOrigins(undefined, 'production'));
     for (const [origin, status] of [
       ['http://localhost:4310', 200],
       ['http://localhost:5173', 403],
@@ -185,7 +180,18 @@ describe('API boundaries', () => {
       name: 'David McKay',
       paused: true,
     });
-    expect(store.settings()).toEqual({ name: 'David McKay', paused: true });
+    expect(store.settings(OWNER)).toEqual({
+      name: 'David McKay',
+      paused: true,
+    });
+    // Settings are each user's own: pausing pauses only your Dots.
+    expect(store.settings('user_other')).toEqual({
+      name: 'Owner',
+      paused: false,
+    });
+    expect(
+      await (await app.request('/api/state', as('user_other'))).json(),
+    ).toEqual({ settings: { name: 'Owner', paused: false } });
     expect(
       (
         await app.request(

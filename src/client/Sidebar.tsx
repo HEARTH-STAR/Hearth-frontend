@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Boxes,
   FileText,
@@ -123,6 +123,7 @@ export function Sidebar({
   onSetup,
   onPages,
   onSettings,
+  account,
 }: {
   workspace: WorkspaceState;
   open: boolean;
@@ -136,6 +137,8 @@ export function Sidebar({
   /** Open a Space's Pages. */
   onPages: (spaceId: string) => void;
   onSettings: () => void;
+  /** The signed-in user's button (Clerk's), below Settings. */
+  account?: ReactNode;
 }) {
   const query = search.trim().toLowerCase();
   const dots = workspace.dots
@@ -229,6 +232,7 @@ export function Sidebar({
           <Settings2 size={16} aria-hidden="true" />
           <span className="nav-row-name">Settings</span>
         </button>
+        {account && <div className="sidebar-account">{account}</div>}
       </div>
     </aside>
   );

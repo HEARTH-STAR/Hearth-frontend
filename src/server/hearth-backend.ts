@@ -92,6 +92,12 @@ export class HearthBackend {
       signal,
     })) as BackendContainer;
   }
+  /** Removes a container, running or not, with its workspace; a 404 means it was already gone. */
+  async remove(name: string): Promise<void> {
+    await this.request(`/api/containers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+  }
   /** Starts a stopped container; Docker may publish it on new host ports. */
   async start(name: string): Promise<BackendContainer> {
     return (await this.request(

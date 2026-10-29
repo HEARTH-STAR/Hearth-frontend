@@ -4,7 +4,9 @@ Hearth-frontend is a single-owner web app under development, not a hosted servic
 
 ## Intended boundary
 
-- Run on loopback. Listening on any other address requires an `OWNER_TOKEN` of 24+ characters; put HTTPS in
+- Every `/api` route needs a Clerk session, except Clerk's webhook (verified with its Svix signature) and
+  `/api/auth/config` (the publishable key). Each user reaches only the Dots they own; any other Dot answers 404.
+  Hearth stores no passwords: Clerk keeps them. Listening beyond loopback requires `APP_ORIGIN`; put HTTPS in
   front of a remote deployment.
 - The browser reaches only this server. Hearth-Core and Hearth-backend credentials and addresses stay on the
   server.

@@ -1,11 +1,16 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { fixture as base } from './helpers.js';
+import { as, fixture as base, OWNER } from './helpers.js';
 const cleanup: (() => void)[] = [];
 afterEach(() => cleanup.splice(0).forEach((fn) => fn()));
-function fixture(ownerToken?: string) {
-  const value = base({ ownerToken });
+function fixture() {
+  const value = base();
   cleanup.push(() => value.close());
-  return { ws: value.workspace, platform: value.platform, app: value.app };
+  return {
+    ws: value.workspace,
+    platform: value.platform,
+    app: value.app,
+    accounts: value.accounts,
+  };
 }
 const request = (body: unknown, method = 'POST') => ({
   method,
@@ -57,23 +62,16 @@ it('supports manual pages without credentials and returns validation, scope and 
     ).status,
   ).toBe(400);
 });
-it('keeps page routes behind owner authentication and browser origin checks', async () => {
-  const { ws, app } = fixture('owner-secret');
+it('keeps page routes behind a Clerk session and browser origin checks', async () => {
+  const { ws, app } = fixture();
   const path = `/api/spaces/${ws.spaces()[0].id}/pages`;
-  expect((await app.request(path)).status).toBe(401);
-  expect(
-    (
-      await app.request(path, {
-        headers: { Authorization: 'Bearer owner-secret' },
-      })
-    ).status,
-  ).toBe(200);
+  expect((await app.request(path, as(''))).status).toBe(401);
+  expect((await app.request(path)).status).toBe(200);
   expect(
     (
       await app.request(path, {
         ...request({ title: 'Cross-origin' }),
         headers: {
-          Authorization: 'Bearer owner-secret',
           'Content-Type': 'application/json',
           Origin: 'https://evil.example',
         },
@@ -83,7 +81,7 @@ it('keeps page routes behind owner authentication and browser origin checks', as
 });
 
 it('saves reviewed drafts once and rechecks the Dot’s Space access', async () => {
-  const { ws, app } = fixture();
+  const { ws, app, accounts } = fixture();
   const dot = ws.dots()[0];
   ws.bindThread('review-thread', dot.id, 'Review');
   const draft = {
@@ -147,18 +145,19 @@ it('saves reviewed drafts once and rechecks the Dot’s Space access', async () 
     ).status,
   ).toBe(409);
   const other = ws.createSpace('Other', '');
+  await accounts.addDot(other.id, 'Other', OWNER);
   ws.updateDot(dot.id, { ...dot, spaceId: other.id, spaceIds: [other.id] });
   expect((await app.request(path, request(draft))).status).toBe(403);
   expect(ws.pages.list(dot.spaceId)).toHaveLength(1);
 });
 
 it('restores review receipts through the owner API with current thread and Space authorization', async () => {
-  const { ws, app } = fixture('owner-secret');
+  const { ws, app, accounts } = fixture();
   const dot = ws.dots()[0];
   ws.bindThread('review-restore', dot.id, 'Review');
   const base = '/api/conversations/review-restore/reviewed-page';
-  const headers = { Authorization: 'Bearer owner-secret' };
-  expect((await app.request(`${base}/call`)).status).toBe(401);
+  const headers = {};
+  expect((await app.request(`${base}/call`, as(''))).status).toBe(401);
   expect(
     await (await app.request(`${base}/call`, { headers })).json(),
   ).toBeNull();
@@ -188,14 +187,15 @@ it('restores review receipts through the owner API with current thread and Space
     ).status,
   ).not.toBe(200);
   const other = ws.createSpace('Other', '');
+  await accounts.addDot(other.id, 'Other', OWNER);
   ws.updateDot(dot.id, { ...dot, spaceId: other.id, spaceIds: [other.id] });
   expect((await app.request(`${base}/call`, { headers })).status).toBe(403);
 });
 
 it('answers malformed JSON and invalid Space access with 400 on workspace routes', async () => {
-  const { ws, app } = fixture();
+  const { ws, app, accounts } = fixture();
   const dot = ws.dots()[0];
-  for (const path of ['/api/spaces', '/api/dots', '/api/conversations']) {
+  for (const path of ['/api/dots', '/api/conversations']) {
     const response = await app.request(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -208,6 +208,7 @@ it('answers malformed JSON and invalid Space access with 400 on workspace routes
     instructions: dot.instructions,
     spaceId: dot.spaceId,
   };
+  // A Space that does not exist is not one of the user's: 404, like another user's.
   expect(
     (
       await app.request(
@@ -215,7 +216,7 @@ it('answers malformed JSON and invalid Space access with 400 on workspace routes
         request({ ...body, spaceId: 'missing-space' }),
       )
     ).status,
-  ).toBe(400);
+  ).toBe(404);
   expect(
     (
       await app.request(
@@ -223,23 +224,36 @@ it('answers malformed JSON and invalid Space access with 400 on workspace routes
         request({ ...body, spaceIds: ['missing-space'] }, 'PUT'),
       )
     ).status,
+  ).toBe(404);
+  // Access that leaves out the Dot's own Space is invalid.
+  const other = ws.createSpace('Other', '');
+  await accounts.addDot(other.id, 'Other', OWNER);
+  expect(
+    (
+      await app.request(
+        `/api/dots/${dot.id}`,
+        request({ ...body, spaceIds: [other.id] }, 'PUT'),
+      )
+    ).status,
   ).toBe(400);
 });
 
 it('answers unexpected workspace failures with 500 and no details', async () => {
-  const { ws, app } = fixture();
+  const { ws, app, accounts } = fixture();
   vi.spyOn(ws, 'createSpace').mockImplementation(() => {
     throw new SyntaxError('Unexpected token in upstream response');
   });
   vi.spyOn(console, 'error').mockImplementation(() => {});
   const response = await app.request(
-    '/api/spaces',
-    request({ name: 'Valid', description: '' }),
+    '/api/dots',
+    as('user_failing', request({ name: 'Valid' })),
   );
   expect(response.status).toBe(500);
   expect(JSON.stringify(await response.json())).not.toContain(
     'Unexpected token',
   );
+  // The Dot row written first is taken back.
+  expect(await accounts.dots('user_failing')).toEqual([]);
 });
 
 it('deletes pages through the API and returns 404 for missing pages or spaces', async () => {
@@ -329,7 +343,7 @@ it.each([
     );
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({
-      error: 'Conversation does not belong to this Dot and owner.',
+      error: 'Conversation not found.',
     });
   },
 );

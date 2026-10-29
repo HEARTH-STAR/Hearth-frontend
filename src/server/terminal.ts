@@ -101,7 +101,6 @@ export interface TerminalOptions {
   computers: ComputerService;
   config: Pick<HearthConfig, 'backendUrl' | 'backendToken'>;
   origin?: string | string[];
-  ownerToken?: string;
 }
 /** Serve ``/api/dots/:id/computer/terminal`` WebSocket upgrades on ``server``. */
 export function attachTerminal(server: Server, options: TerminalOptions) {
@@ -129,7 +128,6 @@ export function attachTerminal(server: Server, options: TerminalOptions) {
         secFetchSite: request.headers['sec-fetch-site'] as string | undefined,
       },
       options.origin,
-      options.ownerToken,
     );
     if (problem) return refuse(socket, 403, problem);
     const dotId = decodeURIComponent(match[1]);

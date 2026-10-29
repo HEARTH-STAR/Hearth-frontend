@@ -441,6 +441,10 @@ code {
   gap: 2px;
   padding-top: 10px;
 }
+.sidebar-account {
+  display: flex;
+  padding: 6px 8px;
+}
 
 /* Banners */
 .notice {

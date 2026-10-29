@@ -9,7 +9,6 @@ export interface HearthConfig {
   spaceHost: string;
   /** Model for conversations; Hearth-Core's manifest default when unset. */
   model?: string;
-  ownerToken?: string;
 }
 const trimmed = (value: string | undefined) => value?.trim() || undefined;
 export function configFromEnv(
@@ -23,6 +22,5 @@ export function configFromEnv(
     containerTemplate: trimmed(env.HEARTH_CONTAINER_TEMPLATE) ?? 'space',
     spaceHost: trimmed(env.HEARTH_SPACE_HOST) ?? '127.0.0.1',
     model: trimmed(env.HEARTH_MODEL),
-    ownerToken: trimmed(env.OWNER_TOKEN),
   };
 }

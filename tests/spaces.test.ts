@@ -74,12 +74,12 @@ it('creates a Space with its own container, then reaches the Hearth-Core inside'
     return undefined;
   });
   const { app, backend, platform, cores } = fixture({ backend: fake.routes });
-  const response = await app.request(
-    '/api/spaces',
-    json({ name: 'Design Lab', description: 'Product design' }),
-  );
+  // A Space is made with its Dot, and shares the Dot's id.
+  const response = await app.request('/api/dots', json({ name: 'Design Lab' }));
   expect(response.status).toBe(201);
-  const space = await response.json();
+  const dot = await response.json();
+  const space = { id: dot.spaceId as string };
+  expect(space.id).toBe(dot.id);
   const listed = async () =>
     (await (await app.request('/api/workspace')).json()).spaces.find(
       (item: { id: string }) => item.id === space.id,
@@ -87,7 +87,7 @@ it('creates a Space with its own container, then reaches the Hearth-Core inside'
   expect(await listed()).toMatchObject({ stage: 'creating', signedIn: null });
   expect(
     backend.calls.find((call) => call.path === '/api/containers')?.body,
-  ).toEqual({ name: `design-lab-${space.id.slice(0, 8)}`, template: 'space' });
+  ).toEqual({ name: space.id, template: 'space' });
   release();
   await platform.spaces.settled(space.id);
   const setup = await (
@@ -95,7 +95,7 @@ it('creates a Space with its own container, then reaches the Hearth-Core inside'
   ).json();
   expect(setup).toMatchObject({
     stage: 'ready',
-    container: `hearth-container-design-lab-${space.id.slice(0, 8)}`,
+    container: `hearth-container-${space.id}`,
     status: 'running',
     coreUrl: 'http://127.0.0.1:50001',
     agent: { connected: true, email: 'owner@example.com' },
@@ -115,9 +115,10 @@ it('reports a failed start plainly and starts again on request', async () => {
         ),
   );
   const { app, platform } = fixture({ backend: fake.routes });
-  const space = await (
-    await app.request('/api/spaces', json({ name: 'Ops' }))
-  ).json();
+  const space = {
+    id: (await (await app.request('/api/dots', json({ name: 'Ops' }))).json())
+      .spaceId as string,
+  };
   await platform.spaces.settled(space.id);
   const failed = await (
     await app.request(`/api/spaces/${space.id}/setup`)
@@ -176,15 +177,19 @@ it('starts a stopped container again, and adopts one a lost answer left behind',
     return Response.json({ detail: 'name already in use' }, { status: 409 });
   });
   const other = fixture({ backend: fake.routes });
-  const space = await (
-    await other.app.request('/api/spaces', json({ name: 'Notes' }))
-  ).json();
+  const space = {
+    id: (
+      await (
+        await other.app.request('/api/dots', json({ name: 'Notes' }))
+      ).json()
+    ).spaceId as string,
+  };
   await other.platform.spaces.settled(space.id);
   expect(
     await (await other.app.request(`/api/spaces/${space.id}/setup`)).json(),
   ).toMatchObject({
     stage: 'ready',
-    container: `hearth-container-notes-${space.id.slice(0, 8)}`,
+    container: `hearth-container-${space.id}`,
   });
 });
 it('signs Claude Code in inside the Space through its Hearth-Core', async () => {
@@ -314,7 +319,7 @@ it('gives each new Dot its own Space and starts its container', async () => {
   expect(workspace.spaces()).toHaveLength(before + 1);
   expect(
     backend.calls.find((call) => call.path === '/api/containers')?.body,
-  ).toEqual({ name: `quill-${space.id.slice(0, 8)}`, template: 'space' });
+  ).toEqual({ name: space.id, template: 'space' });
   await platform.spaces.settled(space.id);
   expect(
     (await (await app.request(`/api/spaces/${space.id}/setup`)).json()).stage,
@@ -339,12 +344,12 @@ it('gives each new Dot its own Space and starts its container', async () => {
   );
   expect(workspace.dot(named.id)?.instructions).toBe(named.instructions);
   await platform.spaces.settled(named.spaceId);
-  // access to a Space that does not exist creates nothing
+  // access to a Space that does not exist (or is another user's) creates nothing
   const refused = await app.request(
     '/api/dots',
     json({ name: 'Ghost', instructions: 'Nothing.', spaceIds: ['nope'] }),
   );
-  expect(refused.status).toBe(400);
+  expect(refused.status).toBe(404);
   expect(workspace.spaces()).toHaveLength(before + 2);
 });
 it('keeps Claude Code sign-in waiting until the container runs', async () => {
@@ -406,7 +411,7 @@ it('gives a Dot the agent it picked, and signs that agent in through its own con
   expect(
     backend.calls.find((call) => call.path === '/api/containers')?.body,
   ).toEqual({
-    name: `cora-${space.id.slice(0, 8)}`,
+    name: space.id,
     template: 'space',
     agent: 'cursor',
   });

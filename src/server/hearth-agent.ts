@@ -29,6 +29,8 @@ export interface HearthAgentDeps {
   /** The Hearth-Core in a Space's container; throws when that Space is not ready. */
   core: (spaceId: string) => Promise<HearthCore>;
   config: Pick<HearthConfig, 'model'>;
+  /** The user who owns a Space, whose settings (name, paused) the Dot runs under. */
+  ownerOf?: (spaceId: string) => Promise<string | undefined>;
 }
 /** Hearth-Core serves the web app's tools to Claude Code under this MCP prefix. */
 const CLIENT_TOOL_PREFIX = 'mcp__client__';
@@ -232,7 +234,8 @@ export class HearthAgent extends AbstractAgent {
       const dot = workspace.dot(this.dotId);
       if (!dot) throw new Error('This Dot no longer exists.');
       workspace.requireThread(threadId, dot.id);
-      const settings = store.settings();
+      const owner = await this.deps.ownerOf?.(dot.spaceId);
+      const settings = store.settings(owner);
       if (settings.paused)
         throw new Error('All Dots are paused. Resume them to continue.');
       // The Dot runs in its home Space's container.
@@ -284,7 +287,7 @@ export class HearthAgent extends AbstractAgent {
         ...(config.model ? { model: config.model } : {}),
       };
       watcher = setInterval(() => {
-        if (store.settings().paused) {
+        if (store.settings(owner).paused) {
           paused = true;
           controller.abort();
         }

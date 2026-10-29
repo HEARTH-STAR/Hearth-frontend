@@ -14,7 +14,7 @@ import {
   type HearthBackend,
 } from './hearth-backend.js';
 import { HearthCore, HearthCoreError } from './hearth-core.js';
-import { slug, type WorkspaceStore } from './workspace.js';
+import type { WorkspaceStore } from './workspace.js';
 
 /** The container port the ``space`` template runs Hearth-Core on. */
 export const CORE_PORT = '5010';
@@ -94,15 +94,36 @@ export class SpaceService {
     if (!space) throw new Error('Space not found.');
     return space;
   }
-  /** The name Hearth-backend gets (it adds its own prefix). */
+  /** The name Hearth-backend gets; it adds its prefix, so the container is ``hearth-container-<dot_id>``. */
   containerName(space: StoredSpace) {
-    return `${slug(space.name, 'space')}-${space.id.slice(0, 8)}`;
+    return space.id;
   }
-  /** A new Space running ``agent``, its container already on the way. */
-  create(name: string, description: string, agent: AgentId = DEFAULT_AGENT) {
-    const space = this.workspace.createSpace(name, description, agent);
+  /** A new Space running ``agent``, its container already on the way. ``id`` is its Dot's id. */
+  create(
+    name: string,
+    description: string,
+    agent: AgentId = DEFAULT_AGENT,
+    id?: string,
+  ) {
+    const space = this.workspace.createSpace(name, description, agent, id);
     this.start(space.id);
     return space;
+  }
+  /**
+   * Removes the Space's container through Hearth-backend, after a spin-up in flight has ended (or
+   * it would come back). A container Docker no longer has counts as removed.
+   */
+  async remove(spaceId: string) {
+    await this.settled(spaceId);
+    const space = this.workspace.space(spaceId);
+    if (!space) return;
+    try {
+      await this.backend.remove(space.container ?? this.containerName(space));
+    } catch (error) {
+      if (!missing(error)) throw friendly(error);
+    }
+    this.failures.delete(spaceId);
+    this.forget(spaceId);
   }
   /**
    * Spins up the Space's container, starts it again when it was stopped, or replaces it when
@@ -270,14 +291,18 @@ export class SpaceService {
   agentChanged(spaceId: string) {
     this.agents.delete(spaceId);
   }
-  async list(): Promise<Space[]> {
+  /** The Spaces whose ids are in ``only`` (default: every Space), each with its container's stage. */
+  async list(only?: ReadonlySet<string>): Promise<Space[]> {
+    const spaces = this.workspace.spaces();
     return Promise.all(
-      this.workspace.spaces().map(async (space) => {
-        const { stage } = await this.probe(space.id);
-        const agent =
-          stage === 'ready' ? await this.agentStatus(space.id) : null;
-        return { ...space, stage, signedIn: agent ? agent.connected : null };
-      }),
+      (only ? spaces.filter((space) => only.has(space.id)) : spaces).map(
+        async (space) => {
+          const { stage } = await this.probe(space.id);
+          const agent =
+            stage === 'ready' ? await this.agentStatus(space.id) : null;
+          return { ...space, stage, signedIn: agent ? agent.connected : null };
+        },
+      ),
     );
   }
   async setup(spaceId: string): Promise<SpaceSetup> {

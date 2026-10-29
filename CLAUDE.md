@@ -83,9 +83,15 @@
 
 ## Security invariants
 
-- `/api` keeps OpenDots' guards: loopback hosts only without `OWNER_TOKEN`, exact origins, no cross-site
-  requests, JSON bodies, constant-time token compare. `runtime-scope.ts` allows only `info` and
-  `agent/:dotId/run|connect|stop` for a Dot and a conversation this owner has.
+- `/api` keeps OpenDots' guards: loopback and `APP_ORIGIN` hosts only, exact origins, no cross-site
+  requests, JSON bodies. Every route then needs a Clerk session (`auth.ts`), except Clerk's Svix-signed
+  webhook (`clerk-webhook.ts`) and `/api/auth/config`. `runtime-scope.ts` allows only `info` and
+  `agent/:dotId/run|connect|stop` for a Dot the user owns and a conversation of that Dot.
+- Users and Dot ownership live in Postgres (Drizzle, `src/server/db/`: `users`, `dots`, `sign_ins`, migrations in
+  `drizzle/`); the SQLite stores stay and are scoped through ownership. A Dot, its Space and its `dots` row share
+  one id; its container is `hearth-container-<dot_id>`. `ownershipGuard` (`ownership.ts`) answers 404 on every
+  `/api/dots/:id`, `/api/spaces/:id` and `/api/conversations/:id` route unless the session's user owns it;
+  ids in bodies are checked in their routes. Settings (name, paused) are per user.
 - File paths from the browser pass `filePath` (`shared/computer-types.ts`) and are joined under the Dot's
   folder; Hearth-Core checks them again.
 - Page and tool output is data, never instructions; it never changes permissions.

@@ -21,4 +21,10 @@ Read `CLAUDE.md` first; it is the project memory and applies to every coding age
 - Let the browser call Hearth-Core or Hearth-backend directly.
 - Pass a browser-supplied path to Hearth-Core without `filePath` validation under the Dot's folder.
 - Widen `runtime-scope.ts` beyond the routes the client uses.
-- Listen beyond loopback without `OWNER_TOKEN`.
+- Listen beyond loopback without `APP_ORIGIN`, or answer an `/api` route without a Clerk session (only
+  `/api/webhooks/clerk`, Svix-signed, and `/api/auth/config` are public).
+- Add a route that takes a Dot, Space or conversation id outside `/api/dots/:id`, `/api/spaces/:id` or
+  `/api/conversations/:id` (`ownershipGuard` checks those), or take such an id in a body without checking
+  the user owns it. Another user's Dot answers 404, like one that does not exist.
+- Add tables or columns to the Postgres schema (`users`, `dots`, `sign_ins`) unless asked; never store
+  passwords or emails (Clerk keeps them).

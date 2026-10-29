@@ -7,10 +7,11 @@ import {
   useState,
   type CSSProperties,
 } from 'react';
+import { SignIn, UserButton, useAuth } from '@clerk/react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
 import { Menu, Monitor, SquarePen, X } from 'lucide-react';
 import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
-import { api, ApiError, authHeaders, setToken } from './api';
+import { api, ApiError, setTokenSource } from './api';
 import {
   applyRefreshResult,
   dismissNotice,
@@ -102,8 +103,9 @@ export function App() {
     setNotices((current) =>
       current.action === action ? current : { ...current, action },
     );
-  const [auth, setAuth] = useState('');
-  const [needsAuth, setNeedsAuth] = useState(false);
+  // Clerk holds the session; every API request carries its token.
+  const { isLoaded, isSignedIn, getToken } = useAuth();
+  setTokenSource(getToken);
   const [dialog, setDialog] = useState<Dialog>();
   const [mobile, setMobile] = useState(false);
   // Beside the conversation on wide screens; on narrow ones it covers it, so it starts closed.
@@ -142,7 +144,6 @@ export function App() {
       ]);
       setState(s);
       setWorkspace(w);
-      setNeedsAuth(false);
       if (!loaded.current && w.dots[0]) {
         // Open where the owner left off: the first Dot's latest conversation.
         loaded.current = true;
@@ -153,7 +154,6 @@ export function App() {
       }
       setNotices((current) => applyRefreshResult(current, { ok: true }));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setNeedsAuth(true);
       setNotices((current) =>
         applyRefreshResult(
           current,
@@ -163,10 +163,11 @@ export function App() {
     }
   }, []);
   useEffect(() => {
+    if (!isSignedIn) return;
     void refresh();
     const timer = setInterval(() => void refresh(), 3000);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, isSignedIn]);
   /** The saved value, or false when the request failed (its error shows in the banner). */
   const mutate = async (path: string, method: string, body?: unknown) => {
     setError('');
@@ -234,45 +235,12 @@ export function App() {
       setBusy(false);
     }
   };
-  if (needsAuth)
+  // Sign-in and sign-up (username and password) are Clerk's.
+  if (isLoaded && !isSignedIn)
     return (
       <main className="unlock">
         <Mascot />
-        <h1>Your own little corner.</h1>
-        <p>Enter the owner access token configured on this Hearth server.</p>
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setToken(auth);
-            try {
-              await api('/state');
-              setError('');
-              await refresh();
-            } catch (err) {
-              setError(
-                err instanceof Error
-                  ? err.message
-                  : 'Access token was not accepted.',
-              );
-            }
-          }}
-        >
-          <input
-            type="password"
-            aria-label="Owner access token"
-            autoComplete="current-password"
-            value={auth}
-            onChange={(e) => setAuth(e.target.value)}
-            required
-          />
-          <button className="primary">Unlock Hearth</button>
-        </form>
-        {error && (
-          <p className="chat-error" role="alert">
-            {error}
-          </p>
-        )}
-        <p className="muted">The token stays in this tab’s session storage.</p>
+        <SignIn routing="hash" withSignUp />
       </main>
     );
   if (!state || !workspace || !dot)
@@ -319,7 +287,6 @@ export function App() {
   return (
     <CopilotKitProvider
       runtimeUrl="/api/copilotkit"
-      headers={authHeaders()}
       // CopilotKit's dev Inspector advertises cloud features Hearth does not use; opt in to debug.
       enableInspector={import.meta.env.VITE_COPILOTKIT_INSPECTOR === 'true'}
     >
@@ -358,6 +325,7 @@ export function App() {
           onSetup={openSetup}
           onPages={(id) => openPage(id)}
           onSettings={() => setDialog({ type: 'settings' })}
+          account={<UserButton showName />}
         />
         <div className="main">
           {error && (

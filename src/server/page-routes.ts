@@ -1,10 +1,18 @@
 import { pageReviewSchema } from '../shared/page-review.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import type { HearthEnv } from './auth.js';
 import { PageError, pageInput, pagePatch } from './pages.js';
 import type { Platform } from './platform.js';
-export function pageRoutes(platform: Platform) {
-  const app = new Hono();
+/**
+ * Pages, under a Space or a conversation the signed-in user owns (``ownershipGuard`` checks the
+ * path). ``ownsDot`` checks a Dot named in a request body.
+ */
+export function pageRoutes(
+  platform: Platform,
+  ownsDot: (userId: string, dotId: string) => Promise<boolean>,
+) {
+  const app = new Hono<HearthEnv>();
   app.get('/conversations/:id/reviewed-page/:toolCallId', (c) => {
     const thread = platform.workspace.requireThread(c.req.param('id'));
     const receipt = platform.workspace.pages.reviewReceipt(
@@ -112,6 +120,8 @@ export function pageRoutes(platform: Platform) {
       .strict()
       .safeParse(await c.req.json());
     if (!data.success) return c.json({ error: 'Choose a specialist.' }, 400);
+    if (!(await ownsDot(c.get('userId'), data.data.dotId)))
+      return c.json({ error: 'Dot not found.' }, 404);
     return c.json(
       await platform.pages.conversation(
         c.req.param('spaceId'),

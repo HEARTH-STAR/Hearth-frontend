@@ -1,8 +1,11 @@
-let token = sessionStorage.getItem('hearth-token') ?? '';
-export function setToken(value: string) {
-  token = value;
-  if (value) sessionStorage.setItem('hearth-token', value);
-  else sessionStorage.removeItem('hearth-token');
+type TokenSource = () => Promise<string | null>;
+let getToken: TokenSource = async () => null;
+/**
+ * Where requests get the signed-in user's Clerk session token (``useAuth().getToken``, which
+ * renews it when it is about to expire). The chat runtime sends Clerk's session cookie instead.
+ */
+export function setTokenSource(source: TokenSource) {
+  getToken = source;
 }
 export class ApiError extends Error {
   constructor(
@@ -20,6 +23,7 @@ export async function api<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
+  const token = await getToken();
   const response = await fetch(`/api${path}`, {
     method,
     signal,
@@ -43,7 +47,4 @@ export async function api<T>(
       data,
     );
   return data as T;
-}
-export function authHeaders(): Record<string, string> {
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }

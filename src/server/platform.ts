@@ -47,6 +47,8 @@ export interface PlatformOptions {
   backend?: HearthBackend;
   /** The client for the Hearth-Core a Space's container serves at ``url`` (faked in tests). */
   coreAt?: (url: string) => HearthCore;
+  /** The user who owns a Space: a Dot runs under its owner's settings. */
+  ownerOf?: (spaceId: string) => Promise<string | undefined>;
 }
 /**
  * Everything behind ``/api``: the CopilotKit runtime (SSE mode, no Intelligence) whose agents are
@@ -87,6 +89,7 @@ export class Platform {
       workspace,
       core: (spaceId: string) => this.spaces.core(spaceId),
       config,
+      ownerOf: options.ownerOf,
     };
     const runtime = new CopilotRuntime({
       runner: this.runner,
@@ -106,11 +109,20 @@ export class Platform {
   setup() {
     return this.monitor.status();
   }
+  /** Removes a Space's container, then everything kept for it here: its Dots, pages and conversations. */
+  async removeSpace(spaceId: string) {
+    await this.spaces.remove(spaceId);
+    this.workspace.deleteSpace(spaceId);
+  }
   createConversation(dotId: string, title: string) {
     if (!this.workspace.dot(dotId)) throw new Error('Dot not found.');
     return this.workspace.bindThread(randomUUID(), dotId, title);
   }
-  async handle(request: Request): Promise<Response> {
+  /** A CopilotKit runtime request, for Dots whose home Space is in ``ownedSpaces``. */
+  async handle(
+    request: Request,
+    ownedSpaces?: ReadonlySet<string>,
+  ): Promise<Response> {
     let body: unknown;
     if (request.method !== 'GET' && request.method !== 'HEAD')
       body = await request
@@ -118,7 +130,14 @@ export class Platform {
         .json()
         .catch(() => null);
     try {
-      validateRuntimeScope(request, this.workspace, body);
+      validateRuntimeScope(
+        request,
+        this.workspace,
+        body,
+        ownedSpaces &&
+          ((dotId) =>
+            ownedSpaces.has(this.workspace.dot(dotId)?.spaceId ?? '')),
+      );
     } catch (error) {
       return Response.json(
         {

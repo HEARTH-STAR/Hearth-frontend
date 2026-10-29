@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 import type { Conversation, Dot, StoredSpace } from '../shared/types.js';
 import { DEFAULT_AGENT, isAgentId, type AgentId } from '../shared/agents.js';
 export type DotInput = Pick<Dot, 'name' | 'instructions'> & {
+  /** Default: a new id. A Dot that is its own Space takes that Space's id. */
+  id?: string;
   spaceId: string;
   spaceIds?: string[];
   directory?: string;
@@ -39,6 +41,8 @@ export class WorkspaceStore {
   constructor(
     path: string,
     readonly ownerId: string,
+    /** Start an empty database with a Scout Dot. Off when each user gets their own first Dot. */
+    seed = true,
   ) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -56,7 +60,7 @@ export class WorkspaceStore {
     this.pages = new Pages(this.db, (id) =>
       this.spaces().some((space) => space.id === id),
     );
-    if (!this.spaces().length) {
+    if (seed && !this.spaces().length) {
       const space = this.createSpace('Scout', '');
       this.createDot({
         spaceId: space.id,
@@ -112,9 +116,10 @@ export class WorkspaceStore {
     name: string,
     description: string,
     agent: AgentId = DEFAULT_AGENT,
+    id: string = randomUUID(),
   ): StoredSpace {
     const space = {
-      id: randomUUID(),
+      id,
       name,
       description,
       createdAt: Date.now(),
@@ -163,7 +168,7 @@ export class WorkspaceStore {
   createDot(input: DotInput): Dot {
     const spaceIds = [...new Set(input.spaceIds ?? [input.spaceId])].sort();
     this.validateSpaceAccess(input.spaceId, spaceIds);
-    const id = randomUUID();
+    const id = input.id ?? randomUUID();
     const dot: Dot = {
       id,
       spaceId: input.spaceId,
@@ -217,6 +222,52 @@ export class WorkspaceStore {
     this.nameSpacesAfterDots();
     return this.dot(id)!;
   }
+  /**
+   * Deletes a Space and everything kept under it here: its pages, the Dots whose home it is (with
+   * their conversations, transcripts and computer records), and every Dot's access to it.
+   */
+  deleteSpace(spaceId: string) {
+    const homed = this.db
+      .prepare('SELECT id FROM dots WHERE spaceId=?')
+      .all(spaceId)
+      .map((row) => String(row.id));
+    this.transaction(() => {
+      for (const dotId of homed) {
+        const threads = this.db
+          .prepare('SELECT id FROM thread_bindings WHERE dotId=?')
+          .all(dotId)
+          .map((row) => String(row.id));
+        for (const threadId of threads)
+          for (const table of ['transcripts', 'handoffs', 'page_reviews'])
+            this.db
+              .prepare(`DELETE FROM ${table} WHERE threadId=?`)
+              .run(threadId);
+        for (const table of [
+          'thread_bindings',
+          'dot_spaces',
+          'page_threads',
+          'computer_permissions',
+          'computer_activity',
+        ])
+          this.db.prepare(`DELETE FROM ${table} WHERE dotId=?`).run(dotId);
+        this.db.prepare('DELETE FROM dots WHERE id=?').run(dotId);
+      }
+      this.db
+        .prepare(
+          'DELETE FROM page_threads WHERE pageId IN (SELECT id FROM pages WHERE spaceId=?)',
+        )
+        .run(spaceId);
+      for (const table of [
+        'pages',
+        'page_reviews',
+        'dot_spaces',
+        'space_containers',
+        'space_agents',
+      ])
+        this.db.prepare(`DELETE FROM ${table} WHERE spaceId=?`).run(spaceId);
+      this.db.prepare('DELETE FROM spaces WHERE id=?').run(spaceId);
+    });
+  }
   canAccessSpace(dotId: string, spaceId: string) {
     return !!this.db
       .prepare('SELECT 1 FROM dot_spaces WHERE dotId=? AND spaceId=?')
@@ -264,10 +315,14 @@ export class WorkspaceStore {
       .run(id, dotId, this.ownerId, title, now, now, '');
     return value;
   }
-  requireThread(id: string, dotId?: string): Conversation {
-    const thread = this.db
+  /** The conversation, or undefined when this owner has none by that id. */
+  conversation(id: string) {
+    return this.db
       .prepare('SELECT * FROM thread_bindings WHERE id=? AND ownerId=?')
       .get(id, this.ownerId) as unknown as Conversation | undefined;
+  }
+  requireThread(id: string, dotId?: string): Conversation {
+    const thread = this.conversation(id);
     if (!thread || (dotId && thread.dotId !== dotId))
       throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;

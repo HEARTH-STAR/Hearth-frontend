@@ -14,8 +14,9 @@ const code = z
   })
   .strict();
 /**
- * Spaces and their setup: creating one spins up its container; the container's Hearth-Core then
- * signs the Space's agent in (Claude Code, Cursor or Antigravity, through that agent's adapter).
+ * Spaces and their setup. A Space is made with its Dot (``POST /api/dots``, which records who owns
+ * it) and spins up its container; the container's Hearth-Core then signs the Space's agent in
+ * (Claude Code, Cursor or Antigravity, through that agent's adapter).
  * A pasted code passes through once and is never stored or echoed here.
  */
 export function spaceRoutes(spaces: SpaceService) {
@@ -27,21 +28,6 @@ export function spaceRoutes(spaces: SpaceService) {
     if (failure) return c.json(failure.body, failure.status);
     console.error('Space request failed:', error);
     return c.json({ error: 'The Space request failed.' }, 500);
-  });
-  app.post('/spaces', async (c) => {
-    const data = z
-      .object({
-        name: z.string().trim().min(1).max(60),
-        description: z.string().max(500).default(''),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null));
-    if (!data.success)
-      return c.json(
-        { error: 'Enter a Space name (up to 60 characters).' },
-        400,
-      );
-    return c.json(spaces.create(data.data.name, data.data.description), 201);
   });
   app.get('/spaces/:id/setup', async (c) =>
     c.json(await spaces.setup(c.req.param('id'))),

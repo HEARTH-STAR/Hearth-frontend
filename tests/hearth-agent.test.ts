@@ -18,6 +18,7 @@ const open: { close(): void }[] = [];
 afterEach(() => open.splice(0).forEach((item) => item.close()));
 function setup(
   events: CoreEvent[] | ((spec: Record<string, unknown>) => CoreEvent[]),
+  ownerOf?: (spaceId: string) => Promise<string | undefined>,
 ) {
   const store = new Store(':memory:');
   const workspace = new WorkspaceStore(':memory:', 'owner');
@@ -37,6 +38,7 @@ function setup(
       workspace,
       core: async () => new HearthCore('http://core.test', core.fetch),
       config: {},
+      ownerOf,
     },
     dot.id,
   );
@@ -383,6 +385,29 @@ it('refuses to start while paused, for an unknown thread, or with nothing new', 
   expect(core.calls.filter((call) => call.path === '/api/chat')).toHaveLength(
     0,
   );
+});
+it('runs under its owner’s settings: another user pausing pauses only their own Dots', async () => {
+  const { agent, store, core } = setup([done], async () => 'user_alice');
+  store.updateSettings({ name: 'Alice' }, 'user_alice');
+  store.updateSettings({ paused: true }, 'user_bob');
+  store.updateSettings({ paused: true });
+  const hi = input([{ id: 'u', role: 'user', content: 'Hi' }]);
+  expect((await run(agent, hi)).at(-1)).toMatchObject({
+    type: 'RUN_FINISHED',
+  });
+  const chat = core.calls.find((call) => call.path === '/api/chat');
+  expect((chat?.body as { system: string }).system).toContain(
+    "in Alice's Hearth workspace",
+  );
+  store.updateSettings({ paused: true }, 'user_alice');
+  expect(
+    (
+      await run(agent, input([{ id: 'u2', role: 'user', content: 'Again' }]))
+    ).at(-1),
+  ).toMatchObject({
+    type: 'RUN_ERROR',
+    message: 'All Dots are paused. Resume them to continue.',
+  });
 });
 it('treats a stream that ends without done as an error', async () => {
   const { agent } = setup([{ type: 'token', token: 'partial' }]);
