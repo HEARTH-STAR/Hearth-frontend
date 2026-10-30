@@ -183,14 +183,15 @@
   min-height: 226px;
   box-shadow: 0 2px 3px #20351d03;
   transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+    border-color 0.2s,
+    box-shadow 0.2s,
+    transform 0.2s ease;
 }
 .library-page-card:hover:not(:disabled) {
   background: #fff;
   border-color: #b4c2b0;
-  box-shadow: 0 5px 15px #26332208;
-  transform: none;
+  box-shadow: 0 14px 30px -18px #26332238;
+  transform: translateY(-3px);
 }
 .library-page-icon {
   color: #6f786a;
@@ -1131,5 +1132,70 @@
   }
   .library-page-card {
     transition: none;
+  }
+}
+
+/* Pages come alive a little: library cards arrive one after another, and the save status
+   lands with a short fade ("All changes saved" pops its check). Reduced motion keeps it still. */
+.library-pages > .library-page-card {
+  animation: library-card-in 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.library-pages > .library-page-card:nth-child(2) {
+  animation-delay: 0.04s;
+}
+.library-pages > .library-page-card:nth-child(3) {
+  animation-delay: 0.08s;
+}
+.library-pages > .library-page-card:nth-child(4) {
+  animation-delay: 0.12s;
+}
+.library-pages > .library-page-card:nth-child(5) {
+  animation-delay: 0.16s;
+}
+.library-pages > .library-page-card:nth-child(n + 6) {
+  animation-delay: 0.2s;
+}
+@keyframes library-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.library-card-arrow {
+  transition: transform 0.2s ease;
+}
+.library-page-card:hover .library-card-arrow {
+  transform: translate(2px, -2px);
+}
+.document-save-status {
+  animation: save-status-in 0.25s ease both;
+}
+.document-save-status.saved {
+  color: #2f7d62;
+}
+.document-save-status.saved svg {
+  animation: save-check-pop 0.4s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+@keyframes save-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+@keyframes save-check-pop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-pages > .library-page-card,
+  .document-save-status,
+  .document-save-status.saved svg {
+    animation: none !important;
+  }
+  .library-page-card:hover:not(:disabled),
+  .library-page-card:hover .library-card-arrow {
+    transform: none !important;
   }
 }

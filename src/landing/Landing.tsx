@@ -16,7 +16,8 @@ import {
   UserCheck,
   Wrench,
 } from 'lucide-react';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { AGENT_IDS, AGENTS } from '../shared/agents';
 import { HeroDemo } from './HeroDemo';
 import { TypedPhrase } from './TypedPhrase';
 import { BrandMark, LandingNav } from './LandingNav';
@@ -111,6 +112,19 @@ export const DOTS = [
   { mascot: 'purple', name: 'Nova', vendor: 'ledgerly' },
 ] as const;
 
+/** ``["a", "b", "c"]`` → ``"a, b or c"``. */
+const orList = (items: string[]) =>
+  items.length > 1
+    ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}`
+    : (items[0] ?? '');
+
+/** "Claude Code, Cursor or Antigravity": every agent a Dot can run (src/shared/agents.ts). */
+export const AGENT_NAMES = orList(AGENT_IDS.map((id) => AGENTS[id].name));
+/** "Claude Code (Claude account), Cursor (Cursor account) or Antigravity (Google account)". */
+export const AGENT_ACCOUNTS = orList(
+  AGENT_IDS.map((id) => `${AGENTS[id].name} (${AGENTS[id].account} account)`),
+);
+
 // Each line here is backed by the code: Space containers, default permissions
 // (shared/computer-types.ts), Hearth-Core's policy, and per-Space sign-in.
 export const SAFETY: Item[] = [
@@ -127,12 +141,12 @@ export const SAFETY: Item[] = [
   {
     icon: <ShieldCheck size={18} />,
     title: 'Guardrails on every step',
-    text: 'Claude Code always runs with its permission checks on, and commands like sudo, docker and gh are blocked.',
+    text: 'Whichever agent a Dot runs, Hearth’s tool policy checks every step, and commands like sudo, docker and gh are blocked.',
   },
   {
     icon: <KeyRound size={18} />,
     title: 'Your sign-ins stay put',
-    text: 'Claude Code and GitHub sign in inside the container. Hearth never stores your tokens.',
+    text: 'Your agent and GitHub sign in inside the container. Hearth never stores your tokens.',
   },
   {
     icon: <UserCheck size={18} />,
@@ -160,8 +174,8 @@ export const REQUIREMENTS: (Item & {
   },
   {
     icon: <KeyRound size={18} />,
-    title: 'A Claude account with Claude Code',
-    text: 'You sign in from each Dot’s setup page. No API key needed.',
+    title: 'An account for your agent',
+    text: `${AGENT_ACCOUNTS}. You sign in from each Dot’s setup page. No API key needed.`,
   },
   {
     icon: <ScrollText size={18} />,
@@ -170,6 +184,64 @@ export const REQUIREMENTS: (Item & {
     link: { href: GITHUB_URL, label: 'View on GitHub' },
   },
 ];
+
+/** Made-up vendors for the strip under the hero, with the version each moved to. */
+export const STRIP_VENDORS = [
+  ...DOTS.map((dot) => dot.vendor),
+  'skyqueue',
+  'parcelbox',
+].map((vendor, index) => ({
+  vendor,
+  version: ['v4', 'v3.2', 'v2', 'v5.1', 'v1.8', 'v6'][index % 6],
+}));
+
+/** "Watching for changes in" and the vendors, gliding across the page (twice over, for a seamless loop). */
+function VendorStrip() {
+  const row = (copy: number) => (
+    <span className="strip-row" key={copy}>
+      <span className="strip-label">Watching for changes in</span>
+      {STRIP_VENDORS.map(({ vendor, version }) => (
+        <span className="strip-vendor" key={vendor}>
+          <code>{vendor}</code>
+          <span className="strip-version">{version}</span>
+        </span>
+      ))}
+    </span>
+  );
+  return (
+    <div className="vendor-strip" aria-hidden="true">
+      <div className="strip-track">{[0, 1].map(row)}</div>
+    </div>
+  );
+}
+
+/**
+ * Leans its child toward the mouse, a few degrees, over a soft glow. Mouse only: touch and
+ * reduced motion keep it flat (landing.css).
+ */
+function TiltStage({ children }: { children: ReactNode }) {
+  const stage = useRef<HTMLDivElement>(null);
+  const lean = (x: number, y: number) => {
+    stage.current?.style.setProperty('--tilt-x', `${x.toFixed(2)}deg`);
+    stage.current?.style.setProperty('--tilt-y', `${y.toFixed(2)}deg`);
+  };
+  return (
+    <div
+      className="tilt-stage"
+      ref={stage}
+      onMouseMove={(event) => {
+        const box = event.currentTarget.getBoundingClientRect();
+        const x = (event.clientX - box.left) / box.width - 0.5;
+        const y = (event.clientY - box.top) / box.height - 0.5;
+        lean(x * 8, -y * 8);
+      }}
+      onMouseLeave={() => lean(0, 0)}
+    >
+      <span className="tilt-glow" aria-hidden="true" />
+      {children}
+    </div>
+  );
+}
 
 function Bento() {
   return (
@@ -274,13 +346,22 @@ export function Landing() {
 
       <main id="top">
         <section className="landing-hero">
+          {/* Soft clouds in the brand-mark colors drift behind the hero, over a faint dot grid. */}
+          <div className="hero-backdrop" aria-hidden="true">
+            <i className="cloud teal" />
+            <i className="cloud lavender" />
+            <i className="cloud amber" />
+          </div>
           <div className="hero-copy">
             <div className="hero-mascots" aria-hidden="true">
               {DOTS.map((dot) => (
                 <img key={dot.mascot} src={`/dots/${dot.mascot}.png`} alt="" />
               ))}
             </div>
-            <p className="hero-eyebrow">For developers who depend on APIs</p>
+            <p className="hero-eyebrow">
+              <span className="pulse-dot" aria-hidden="true" />
+              For developers who depend on APIs
+            </p>
             <h1>
               Stop finding out about <TypedPhrase /> in production.
             </h1>
@@ -303,8 +384,12 @@ export function Landing() {
               <li>Needs Docker</li>
             </ul>
           </div>
-          <HeroDemo />
+          <TiltStage>
+            <HeroDemo />
+          </TiltStage>
         </section>
+
+        <VendorStrip />
 
         <section id="problem" className="landing-section band">
           <h2>Keeping up with every vendor is a job nobody has time for</h2>
@@ -328,7 +413,8 @@ export function Landing() {
           <h2>One Dot per vendor</h2>
           <p className="section-lede">
             Give each API you depend on its own Dot. Every Dot gets its own
-            container, its own look, and a name you choose.
+            container, its own look, a name you choose, and the agent you
+            prefer: {AGENT_NAMES}.
           </p>
           <ul className="landing-dots">
             {DOTS.map((dot) => (

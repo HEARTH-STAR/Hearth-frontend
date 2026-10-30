@@ -195,6 +195,27 @@ export function workspaceRoutes(
       201,
     );
   });
+  app.patch('/conversations/:id', async (c) => {
+    const data = z
+      .object({ title: z.string().trim().min(1).max(120) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success)
+      return c.json({ error: 'Give the conversation a title.' }, 400);
+    return c.json(
+      platform.renameConversation(c.req.param('id'), data.data.title),
+    );
+  });
+  app.delete('/conversations/:id', (c) => {
+    platform.deleteConversation(c.req.param('id'));
+    return c.json({ ok: true });
+  });
+  /** When each turn was asked and answered, for the times shown on messages. */
+  app.get('/conversations/:id/times', (c) => {
+    const id = c.req.param('id');
+    platform.workspace.requireThread(id);
+    return c.json(platform.workspace.turnTimes(id));
+  });
   /** Chat: the Dot named in the runtime path must be the user's. */
   app.all('/copilotkit/*', async (c) => {
     const owned = await accounts.ownedDotIds(c.get('userId'));
@@ -219,6 +240,11 @@ export function workspaceRoutes(
     // server fault.
     if (/^(Dot not found|Conversation does not belong)/.test(text))
       return c.json({ error: text }, 404);
+    // A conversation that cannot be deleted right now (running, or a page's own).
+    if (
+      /^(This conversation is still running|A page’s conversation)/.test(text)
+    )
+      return c.json({ error: text }, 409);
     // Deleting a Dot needs Hearth-backend (and Docker) to remove its container.
     const failure = spaceFailure(error);
     if (failure) return c.json(failure.body, failure.status);

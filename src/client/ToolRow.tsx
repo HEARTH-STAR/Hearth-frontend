@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { openPageLink } from './page-navigation';
+import { blockedReason } from './chat-errors';
 import { folderRelative, formatBytes, shortPath } from '../shared/paths';
 export type ToolRenderProps = {
   name: string;
@@ -168,12 +169,18 @@ export function ToolRow({
   directory,
   running,
   onOpenFile,
+  dotName = 'This Dot',
 }: ToolRenderProps & {
   directory: string;
   running: boolean;
   onOpenFile?: (path: string) => void;
+  /** Names the Dot in a blocked call's explanation ("Running commands is off for Dora"). */
+  dotName?: string;
 }) {
-  const view = describeTool(name, args, result, directory);
+  const described = describeTool(name, args, result, directory);
+  const view = described.denied
+    ? { ...described, problem: blockedReason(described.problem, dotName) }
+    : described;
   const done = result !== undefined && result !== null && result !== '';
   const Icon = view.denied ? Ban : !done && running ? LoaderCircle : view.icon;
   const target =
@@ -220,7 +227,7 @@ export function ToolRow({
   );
   return (
     <div
-      className={`tool-row ${view.problem ? 'failed' : ''}`}
+      className={`tool-row ${view.problem ? 'failed' : done ? 'done' : ''}`}
       aria-label={`${view.verb} ${view.target}`.trim()}
     >
       {view.output && done ? (

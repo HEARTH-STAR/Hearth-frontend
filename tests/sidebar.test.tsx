@@ -134,3 +134,29 @@ it('takes the Hearth logo to the landing page', () => {
   expect(brand.props.href).toBe('/welcome/');
   expect(text(brand)).toBe('Hearth');
 });
+
+it('names each Dot row, so the active highlight can find it', () => {
+  let root!: ReturnType<typeof create>;
+  act(() => {
+    root = create(
+      createElement(Sidebar, {
+        workspace,
+        open: false,
+        search: '',
+        activeDot: 'dot-1',
+        onSearch: vi.fn(),
+        onDot: vi.fn(),
+        onCreateDot: vi.fn(),
+        onSetup: vi.fn(),
+        onPages: vi.fn(),
+        onSettings: vi.fn(),
+      }),
+    );
+  });
+  const row = root.root.findByProps({ 'data-dot-id': 'dot-1' });
+  expect(row.props.className).toContain('active');
+  // Without a page to measure (as here), no highlight is drawn and the row keeps its own background.
+  expect(
+    root.root.findAll((node) => node.props.className === 'dot-highlight'),
+  ).toHaveLength(0);
+});

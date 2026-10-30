@@ -109,9 +109,15 @@ it('sets a reply without sections in one untitled card', () => {
       messages={[{ id: 'r', role: 'assistant', content: 'Just a sentence.' }]}
     />,
   );
-  expect(html).toBe(
-    '<div class="chat-bubble assistant"><section class="reply-card whole"><p>Just a sentence.</p></section></div>',
-  );
+  expect(
+    html.startsWith(
+      '<div class="chat-bubble assistant"><section class="reply-card whole"><p>Just a sentence.</p></section></div>',
+    ),
+  ).toBe(true);
+  // Then the hover row: Copy, and no time for a message the server has none for.
+  expect(html).toContain('<div class="message-meta assistant">');
+  expect(html).toContain('aria-label="Copy message"');
+  expect(html).not.toContain('<time');
 });
 it('reads a code block’s language and text for the Copy button', async () => {
   const { languageOf, textOf } = await import('../src/client/CodeCard');

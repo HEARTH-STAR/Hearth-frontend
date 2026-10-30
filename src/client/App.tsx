@@ -287,6 +287,21 @@ export function App() {
       selected={thread?.id}
       onSelect={(id) => setSelectedThread(id)}
       onNew={() => void newConversation()}
+      onRename={async (id, title) => {
+        await api(`/conversations/${encodeURIComponent(id)}`, 'PATCH', {
+          title,
+        });
+        await refresh();
+      }}
+      onDelete={async (id) => {
+        await api(`/conversations/${encodeURIComponent(id)}`, 'DELETE');
+        // Deleting the open conversation moves to the Dot's latest other one, or a new one.
+        if (id === thread?.id)
+          setSelectedThread(
+            dotConversations.find((item) => item.id !== id)?.id,
+          );
+        await refresh();
+      }}
     />
   );
   // Starting over is one click from any conversation, not hidden in the history menu.

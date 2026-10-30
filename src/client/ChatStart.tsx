@@ -65,6 +65,22 @@ export function composerPlaceholder({
   return started ? `Message ${name}` : 'Which API or SDK changed?';
 }
 
+/** The line under the composer: how to send, or how to stop a running reply. */
+export function composerHint({
+  running,
+  files,
+}: {
+  running: boolean;
+  files: boolean;
+}) {
+  if (running) return 'Esc to stop';
+  return [
+    'Enter to send',
+    'Shift+Enter for a new line',
+    ...(files ? ['+ to reference a file'] : []),
+  ].join(' · ');
+}
+
 /** Focus the composer with a starter's first [blank] selected, ready to type over. */
 export function focusBlank(input: HTMLTextAreaElement | null, text: string) {
   if (!input) return;

@@ -41,6 +41,38 @@ export function clearInterruptedRuns(path: string) {
     db.close();
   }
 }
+/** Runs ``use`` on the runner's database when it is a file with run tables (not ``:memory:``). */
+function withRunTables<T>(path: string, use: (db: DatabaseSync) => T) {
+  if (path === ':memory:' || !existsSync(path)) return undefined;
+  const db = new DatabaseSync(path);
+  try {
+    const table = db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_runs'",
+      )
+      .get();
+    return table ? use(db) : undefined;
+  } finally {
+    db.close();
+  }
+}
+/** Whether the runner has a turn of this conversation in progress. */
+export function threadIsRunning(path: string, threadId: string) {
+  return !!withRunTables(
+    path,
+    (db) =>
+      db
+        .prepare('SELECT 1 FROM run_state WHERE thread_id=? AND is_running=1')
+        .get(threadId) !== undefined,
+  );
+}
+/** Removes a conversation's recorded history (its AG-UI run events) from the runner. */
+export function deleteThreadRuns(path: string, threadId: string) {
+  withRunTables(path, (db) => {
+    db.prepare('DELETE FROM agent_runs WHERE thread_id=?').run(threadId);
+    db.prepare('DELETE FROM run_state WHERE thread_id=?').run(threadId);
+  });
+}
 export interface PlatformOptions {
   /** SQLite file for conversation history (AG-UI run events); ``:memory:`` in tests. */
   threadsDatabase: string;
@@ -63,6 +95,7 @@ export class Platform {
   readonly pages: PageService;
   readonly handler: CopilotHonoApp;
   private runner: SqliteAgentRunner;
+  private readonly threadsDatabase: string;
   constructor(
     readonly store: Store,
     readonly workspace: WorkspaceStore,
@@ -81,6 +114,7 @@ export class Platform {
     );
     this.computers = new ComputerService(workspace, this.spaces);
     this.pages = new PageService(workspace);
+    this.threadsDatabase = options.threadsDatabase;
     clearInterruptedRuns(options.threadsDatabase);
     this.runner = new SqliteAgentRunner({ dbPath: options.threadsDatabase });
     // Each Dot runs in its home Space's container.
@@ -117,6 +151,27 @@ export class Platform {
   createConversation(dotId: string, title: string) {
     if (!this.workspace.dot(dotId)) throw new Error('Dot not found.');
     return this.workspace.bindThread(randomUUID(), dotId, title);
+  }
+  renameConversation(id: string, title: string) {
+    return this.workspace.renameThread(id, title);
+  }
+  /**
+   * Deletes a conversation from Hearth and its history from the runner. A running one is stopped
+   * first by its owner, and a page's own conversation stays with its page. The agent's copy of the
+   * session inside the Dot's container is out of reach from here and is left alone.
+   */
+  deleteConversation(id: string) {
+    this.workspace.requireThread(id);
+    if (this.workspace.isPageThread(id))
+      throw new Error(
+        'A page’s conversation stays with its page. Rename it instead.',
+      );
+    if (threadIsRunning(this.threadsDatabase, id))
+      throw new Error(
+        'This conversation is still running. Stop it, then delete it.',
+      );
+    this.workspace.deleteThread(id);
+    deleteThreadRuns(this.threadsDatabase, id);
   }
   /** A CopilotKit runtime request, for Dots whose home Space is in ``ownedSpaces``. */
   async handle(

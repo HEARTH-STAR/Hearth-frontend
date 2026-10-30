@@ -327,6 +327,58 @@ export class WorkspaceStore {
       throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;
   }
+  /**
+   * When each turn of a conversation was asked and answered, oldest first: the owner's message time
+   * and, once the Dot replied, the reply's. A turn that ended without a reply has no ``replied``.
+   */
+  turnTimes(threadId: string): { asked: number; replied?: number }[] {
+    const rows = this.db
+      .prepare(
+        'SELECT role, createdAt FROM transcripts WHERE threadId=? ORDER BY id',
+      )
+      .all(threadId) as unknown as Pick<
+      TranscriptEntry,
+      'role' | 'createdAt'
+    >[];
+    const turns: { asked: number; replied?: number }[] = [];
+    for (const row of rows) {
+      const last = turns.at(-1);
+      if (row.role === 'user') turns.push({ asked: row.createdAt });
+      else if (last && last.replied === undefined) last.replied = row.createdAt;
+    }
+    return turns;
+  }
+  renameThread(id: string, title: string): Conversation {
+    this.requireThread(id);
+    this.db
+      .prepare('UPDATE thread_bindings SET title=? WHERE id=? AND ownerId=?')
+      .run(title, id, this.ownerId);
+    return this.requireThread(id);
+  }
+  /** A page's own conversation: it opens with the page, so it is renamed but never deleted alone. */
+  isPageThread(id: string) {
+    return !!this.db
+      .prepare('SELECT 1 FROM page_threads WHERE threadId=?')
+      .get(id);
+  }
+  /**
+   * Removes a conversation from Hearth: its binding, transcript, open review cards and drafts. The
+   * Dot's computer keeps its activity and pages keep their content, both no longer linked to it.
+   */
+  deleteThread(id: string) {
+    this.requireThread(id);
+    this.transaction(() => {
+      for (const sql of [
+        'DELETE FROM transcripts WHERE threadId=?',
+        'DELETE FROM handoffs WHERE threadId=?',
+        'DELETE FROM page_reviews WHERE threadId=?',
+        'UPDATE computer_activity SET threadId=NULL WHERE threadId=?',
+        'UPDATE pages SET sourceThreadId=NULL WHERE sourceThreadId=?',
+        'DELETE FROM thread_bindings WHERE id=?',
+      ])
+        this.db.prepare(sql).run(id);
+    });
+  }
   /** Moves a conversation to the top of the sidebar with a fresh one-line preview. */
   touchThread(id: string, preview: string) {
     this.db

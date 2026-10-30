@@ -166,6 +166,8 @@ export function PageDocument({
             <PanelLeft size={17} />
           </button>
           <span
+            // A new key per status replays its short fade, so "saved" visibly lands.
+            key={state.status}
             className={`document-save-status ${state.status}`}
             role="status"
             aria-live="polite"

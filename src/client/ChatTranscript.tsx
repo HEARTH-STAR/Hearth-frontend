@@ -1,5 +1,7 @@
 import { openPageLink } from './page-navigation';
-import { Fragment, memo, type ReactNode } from 'react';
+import { Check, Copy } from 'lucide-react';
+import { Fragment, memo, useEffect, useState, type ReactNode } from 'react';
+import { messageTime } from './chat-errors';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AssistantMessage, Message } from '@ag-ui/core';
@@ -62,23 +64,113 @@ const Bubble = memo(function Bubble({
   );
 });
 
+/** Under a message, on hover: when it was sent, and Copy. */
+function MessageMeta({
+  role,
+  text,
+  at,
+}: {
+  role: Message['role'];
+  text: string;
+  at?: number;
+}) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <div className={`message-meta ${role}`}>
+      {at !== undefined && (
+        <time
+          dateTime={new Date(at).toISOString()}
+          title={new Date(at).toLocaleString()}
+        >
+          {messageTime(at)}
+        </time>
+      )}
+      <button
+        type="button"
+        className="message-copy"
+        aria-label={copied ? 'Copied' : 'Copy message'}
+        title={copied ? 'Copied' : 'Copy'}
+        onClick={() => {
+          void navigator.clipboard
+            ?.writeText(text)
+            .then(() => setCopied(true))
+            .catch(() => {});
+        }}
+      >
+        {copied ? <Check size={13} /> : <Copy size={13} />}
+        <span>{copied ? 'Copied' : 'Copy'}</span>
+      </button>
+    </div>
+  );
+}
+
 export function ChatTranscript({
   messages,
   renderTools,
+  times,
 }: {
   messages: Message[];
   renderTools?: (message: AssistantMessage) => ReactNode;
+  /** When a message was sent, by message id (see ``messageTimes``). */
+  times?: ReadonlyMap<string, number>;
 }) {
   return (
     <>
       {messages.map((message) => (
         <Fragment key={message.id}>
           {typeof message.content === 'string' && message.content.trim() && (
-            <Bubble role={message.role} content={message.content} />
+            <>
+              <Bubble role={message.role} content={message.content} />
+              <MessageMeta
+                role={message.role}
+                text={message.content}
+                at={times?.get(message.id)}
+              />
+            </>
           )}
           {message.role === 'assistant' && renderTools?.(message)}
         </Fragment>
       ))}
     </>
   );
+}
+
+/**
+ * Matches the server's turn times to the conversation's messages: each of the owner's messages gets
+ * its turn's ``asked`` time and the turn's last written reply its ``replied`` time. The turns line up
+ * from the newest backwards, so older messages from before times were kept simply show none.
+ */
+export function messageTimes(
+  messages: Message[],
+  turns: { asked: number; replied?: number }[],
+): Map<string, number> {
+  const times = new Map<string, number>();
+  const starts = messages.flatMap((message, index) =>
+    message.role === 'user' ? [index] : [],
+  );
+  const offset = starts.length - turns.length;
+  starts.forEach((start, n) => {
+    const turn = turns[n - offset];
+    if (!turn) return;
+    times.set(messages[start].id, turn.asked);
+    if (turn.replied === undefined) return;
+    const end = starts[n + 1] ?? messages.length;
+    for (let index = end - 1; index > start; index--) {
+      const reply = messages[index];
+      if (
+        reply.role === 'assistant' &&
+        typeof reply.content === 'string' &&
+        reply.content.trim()
+      ) {
+        times.set(reply.id, turn.replied);
+        break;
+      }
+    }
+  });
+  return times;
 }

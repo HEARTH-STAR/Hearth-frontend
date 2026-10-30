@@ -9,7 +9,10 @@ import {
   DEMO_TOOLS,
   demoTimeline,
 } from '../src/landing/HeroDemo';
+import { AGENT_IDS, AGENTS } from '../src/shared/agents';
 import {
+  AGENT_ACCOUNTS,
+  AGENT_NAMES,
   APP_URL,
   DOTS,
   FEATURES,
@@ -21,6 +24,7 @@ import {
   REQUIREMENTS,
   SAFETY,
   STEPS,
+  STRIP_VENDORS,
 } from '../src/landing/Landing';
 import {
   activeSection,
@@ -69,9 +73,23 @@ it('sets expectations: what you need, and no API key', () => {
   expect(html).toContain('wsl --install');
   expect(REQUIREMENTS.map((item) => item.title)).toEqual([
     'Docker Desktop',
-    'A Claude account with Claude Code',
+    'An account for your agent',
     'The Hearth repositories',
   ]);
+});
+
+it('names every agent a Dot can run, and claims nothing Claude-only', () => {
+  for (const id of AGENT_IDS) {
+    expect(html).toContain(AGENTS[id].name);
+    expect(AGENT_ACCOUNTS).toContain(
+      `${AGENTS[id].name} (${AGENTS[id].account} account)`,
+    );
+  }
+  expect(AGENT_NAMES).toBe('Claude Code, Cursor or Antigravity');
+  // Safety and sign-in lines speak for every agent, not just Claude Code.
+  for (const item of SAFETY) expect(item.text).not.toContain('Claude Code');
+  // Mascots stand for any Dot: none is tied to one agent.
+  expect(html).not.toContain('dot-agent');
 });
 
 it('opens outside links in a new tab without passing on the page', () => {
@@ -245,4 +263,32 @@ it('gives the top bar a skip link, GitHub, and a closed phone menu', () => {
   expect(menu).toContain('Hearth on GitHub');
   // The reading line starts empty.
   expect(header).toContain('transform:scaleX(0)');
+});
+
+it('livens the hero in the existing colors: clouds, a tilting demo, a glowing stage', () => {
+  expect(html).toContain('class="hero-backdrop" aria-hidden="true"');
+  for (const cloud of ['teal', 'lavender', 'amber'])
+    expect(html).toContain(`class="cloud ${cloud}"`);
+  expect(html).toContain('class="pulse-dot"');
+  // The demo sits in the tilt stage, over its glow, and is still hidden from readers.
+  const stage = html.slice(html.indexOf('class="tilt-stage"'));
+  expect(stage.indexOf('tilt-glow')).toBeLessThan(
+    stage.indexOf('landing-preview'),
+  );
+  expect(html).toContain('class="landing-preview" aria-hidden="true"');
+});
+
+it('glides a strip of made-up vendors under the hero, twice over for a seamless loop', () => {
+  const strip = html.slice(
+    html.indexOf('class="vendor-strip"'),
+    html.indexOf('id="problem"'),
+  );
+  expect(strip).toContain('aria-hidden="true"');
+  for (const { vendor, version } of STRIP_VENDORS) {
+    expect(strip.split(`<code>${vendor}</code>`)).toHaveLength(3);
+    expect(strip).toContain(version);
+  }
+  // The demo's vendor and every example Dot's vendor are in it.
+  for (const dot of DOTS)
+    expect(STRIP_VENDORS.map((item) => item.vendor)).toContain(dot.vendor);
 });
