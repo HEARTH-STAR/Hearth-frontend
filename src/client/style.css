@@ -194,12 +194,18 @@ code {
   }
 }
 
-/* App frame: sidebar | main | computer */
+/* App frame: sidebar | main | computer. Pinned to the window: anything outside it (a portal another
+   library adds to <body>) can make the page taller, and a focus or scrollIntoView would then scroll the
+   whole page and leave the frame cut off with empty page below it. Only the frame's own areas scroll. */
+html:has(.hearth-app),
+html:has(.hearth-app) body {
+  overflow: hidden;
+}
 .hearth-app {
+  position: fixed;
+  inset: 0;
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  height: 100vh;
-  height: 100dvh;
   overflow: hidden;
   background: var(--canvas);
 }
