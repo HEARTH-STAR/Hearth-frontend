@@ -112,6 +112,42 @@ export interface SpaceSetup {
   agent: AgentStatus | null;
   github: GitHubStatus | null;
 }
+/**
+ * What a Space's container printed, split for the Setup page: `build` is its start script getting
+ * Hearth-Core ready (clone, the agent's CLI, Python packages), `agent` is Hearth-Core and its agent running.
+ * `supported` is false where Hearth-backend cannot read logs (Azure).
+ */
+export interface ContainerLogs {
+  supported: boolean;
+  agent: string[];
+  build: string[];
+}
+/** One Hearth-Core commit. */
+export interface CoreCommit {
+  sha: string;
+  subject: string;
+  date: string;
+}
+/**
+ * The Hearth-Core a Space's container runs, and the newest commit of the branch it was cloned from
+ * (`main`). `supported` is false for a container whose Hearth-Core predates updates.
+ */
+export interface CoreVersion {
+  supported: boolean;
+  enabled: boolean;
+  branch: string | null;
+  current: CoreCommit | null;
+  latest: CoreCommit | null;
+  updateAvailable: boolean;
+  checkedAt: string | null;
+  error: string | null;
+}
+export interface CoreUpdate {
+  updated: boolean;
+  restarting: boolean;
+  from: CoreCommit;
+  to: CoreCommit;
+}
 /** The Space's GitHub account, held by the gh CLI inside its container. */
 export interface GitHubStatus {
   connected: boolean;

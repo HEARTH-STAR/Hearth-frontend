@@ -3,6 +3,36 @@ import type {
   WorkspaceListing,
 } from '../shared/computer-types.js';
 import { AGENTS, type AgentId } from '../shared/agents.js';
+import type { CoreCommit, CoreUpdate } from '../shared/types.js';
+import type {
+  Blob,
+  BranchList,
+  CommitDetail,
+  CommitPage,
+  CommitsQuery,
+  RepoList,
+  RepoSummary,
+  Tree,
+  TreeQuery,
+} from '../shared/repo-types.js';
+import type {
+  CommentInput,
+  Detection,
+  DetectionSummary,
+  MergeMethod,
+  MergeResult,
+  PullComment,
+  PullDetail,
+  PullFile,
+  PullReview,
+  RepoWatchInput,
+  RepoWatchResult,
+  ReviewEvent,
+  Watch,
+  WatchInput,
+  WatchOverview,
+  WatchPatch,
+} from '../shared/watch-types.js';
 // Hearth-Core's HTTP API, as the Hearth web app uses it. Each Space's container runs one Hearth-Core;
 // only this server talks to it, the browser never does.
 
@@ -150,13 +180,29 @@ async function failure(response: Response) {
     string,
     unknown
   > | null;
+  // FastAPI's validation errors (422) carry a list: [{msg: 'Value error, …', loc: […]}, …].
+  const first = Array.isArray(body?.detail)
+    ? (body.detail[0] as { msg?: unknown } | undefined)?.msg
+    : undefined;
   const message =
     typeof body?.detail === 'string'
       ? body.detail
-      : typeof body?.error === 'string'
-        ? body.error
-        : `Hearth-Core returned HTTP ${response.status}.`;
+      : typeof first === 'string'
+        ? first.replace(/^Value error, /, '')
+        : typeof body?.error === 'string'
+          ? body.error
+          : `Hearth-Core returned HTTP ${response.status}.`;
   return new HearthCoreError(message, response.status, body ?? undefined);
+}
+/** Hearth-Core's `GET /api/core/version`, as it answers. */
+export interface RawCoreVersion {
+  enabled: boolean;
+  branch: string | null;
+  current: CoreCommit | null;
+  latest: CoreCommit | null;
+  update_available: boolean;
+  checked_at: string | null;
+  error: string | null;
 }
 export class HearthCore {
   constructor(
@@ -185,6 +231,15 @@ export class HearthCore {
   }
   async health(signal?: AbortSignal): Promise<{ ok: boolean; agent?: string }> {
     return (await this.request('/health', { signal })).json();
+  }
+  /** Hearth-Core's running commit and the newest on its branch (`refresh` fetches it now). */
+  async coreVersion(refresh = false): Promise<RawCoreVersion> {
+    const query = refresh ? '?refresh=true' : '';
+    return (await this.request(`/api/core/version${query}`)).json();
+  }
+  /** Move Hearth-Core to the newest commit of its branch; it restarts itself right after answering. */
+  async coreUpdate(): Promise<CoreUpdate> {
+    return (await this.request('/api/core/update', { method: 'POST' })).json();
   }
   /** One chat turn. Aborting ``signal`` closes the stream, which stops the turn in Hearth-Core. */
   async *chat(spec: ChatSpec, signal: AbortSignal): AsyncGenerator<CoreEvent> {
@@ -311,5 +366,139 @@ export class HearthCore {
   }
   agentLogout(agent: AgentId) {
     return this.connector<AgentConnection>(agent, '/logout');
+  }
+  // API watch: Hearth-Core polls OpenAPI specs, and on a breaking change its agent fixes the watched
+  // repo and opens a PR through the Space's gh. A 204 answer has no body.
+  private async watch<T>(
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<{ status: number; body: T }> {
+    const response = await this.request(`/api/watch${path}`, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return {
+      status: response.status,
+      body: (response.status === 204 ? undefined : await response.json()) as T,
+    };
+  }
+  watchOverview() {
+    return this.watch<WatchOverview>('GET', '');
+  }
+  watchCreate(input: WatchInput) {
+    return this.watch<Watch>('POST', '', input);
+  }
+  /** One watch per API provider the repo's dependencies name; takes a while (it fetches the repo). */
+  watchFromRepo(input: RepoWatchInput) {
+    return this.watch<RepoWatchResult>('POST', '/repo', input);
+  }
+  watchUpdate(watchId: string, patch: WatchPatch) {
+    return this.watch<Watch>('PATCH', `/${encodeURIComponent(watchId)}`, patch);
+  }
+  watchDelete(watchId: string) {
+    return this.watch<undefined>('DELETE', `/${encodeURIComponent(watchId)}`);
+  }
+  /** Checks the spec now; 409 while a check runs. */
+  watchCheck(watchId: string) {
+    return this.watch<Watch>(
+      'POST',
+      `/${encodeURIComponent(watchId)}/check`,
+      {},
+    );
+  }
+  detection(detectionId: string) {
+    return this.watch<Detection>(
+      'GET',
+      `/detections/${encodeURIComponent(detectionId)}`,
+    );
+  }
+  /** Starts or retries the AI fix; 409 while one runs or once its PR is open or merged. */
+  detectionFix(detectionId: string) {
+    return this.watch<DetectionSummary>(
+      'POST',
+      `/detections/${encodeURIComponent(detectionId)}/fix`,
+      {},
+    );
+  }
+  private pull<T>(
+    method: 'GET' | 'POST',
+    detectionId: string,
+    path: string,
+    body?: unknown,
+  ) {
+    return this.watch<T>(
+      method,
+      `/detections/${encodeURIComponent(detectionId)}/pull${path}`,
+      body,
+    );
+  }
+  pullDetail(detectionId: string) {
+    return this.pull<PullDetail>('GET', detectionId, '');
+  }
+  pullFiles(detectionId: string) {
+    return this.pull<{ files: PullFile[] }>('GET', detectionId, '/files');
+  }
+  pullComments(detectionId: string) {
+    return this.pull<{ comments: PullComment[] }>(
+      'GET',
+      detectionId,
+      '/comments',
+    );
+  }
+  pullComment(detectionId: string, comment: CommentInput) {
+    return this.pull<PullComment>('POST', detectionId, '/comments', comment);
+  }
+  pullReview(
+    detectionId: string,
+    review: { event: ReviewEvent; body?: string },
+  ) {
+    return this.pull<PullReview>('POST', detectionId, '/reviews', review);
+  }
+  pullMerge(detectionId: string, method: MergeMethod) {
+    return this.pull<MergeResult>('POST', detectionId, '/merge', { method });
+  }
+  // The repo browser: read-only views of Hearth-Core's mirror of each watched repo.
+  private async repo<T>(
+    owner: string,
+    name: string,
+    path: string,
+    query: Record<string, string | number | undefined> = {},
+  ): Promise<T> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query))
+      if (value !== undefined) params.set(key, String(value));
+    const search = params.toString() ? `?${params}` : '';
+    return (
+      await this.request(
+        `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${path}${search}`,
+      )
+    ).json() as Promise<T>;
+  }
+  /** The repos that have an API watch, which are the ones that can be browsed. */
+  async repoList(): Promise<RepoList> {
+    return (await this.request('/api/repos')).json();
+  }
+  repoSummary(owner: string, name: string, ref?: string) {
+    return this.repo<RepoSummary>(owner, name, '', { ref });
+  }
+  repoTree(owner: string, name: string, query: TreeQuery) {
+    return this.repo<Tree>(owner, name, '/tree', { ...query });
+  }
+  repoBlob(owner: string, name: string, query: TreeQuery & { path: string }) {
+    return this.repo<Blob>(owner, name, '/blob', { ...query });
+  }
+  repoCommits(owner: string, name: string, query: CommitsQuery) {
+    return this.repo<CommitPage>(owner, name, '/commits', { ...query });
+  }
+  repoCommit(owner: string, name: string, sha: string) {
+    return this.repo<CommitDetail>(
+      owner,
+      name,
+      `/commits/${encodeURIComponent(sha)}`,
+    );
+  }
+  repoBranches(owner: string, name: string) {
+    return this.repo<BranchList>(owner, name, '/branches');
   }
 }

@@ -58,7 +58,6 @@ export function SpaceLibrary({
     >
       <header className="library-heading">
         <div>
-          <span className="library-eyebrow">SPACE</span>
           <h1>{space.name}</h1>
           {space.description && <p>{space.description}</p>}
         </div>

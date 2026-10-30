@@ -10,6 +10,8 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import { Store } from './store.js';
+import { watchRoutes } from './watch-routes.js';
+import { repoRoutes } from './repo-routes.js';
 import type { Platform } from './platform.js';
 import { workspaceRoutes } from './workspace-routes.js';
 export interface AppOptions {
@@ -80,6 +82,8 @@ export function createApp({
   app.route('/api', computerRoutes(platform.computers));
   app.route('/api', spaceRoutes(platform.spaces));
   app.route('/api', githubRoutes(platform.spaces));
+  app.route('/api', watchRoutes(platform.spaces));
+  app.route('/api', repoRoutes(platform.spaces));
   app.route(
     '/api',
     workspaceRoutes(platform, accounts, (userId) => auth.username(userId)),

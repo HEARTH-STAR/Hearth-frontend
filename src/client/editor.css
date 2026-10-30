@@ -56,17 +56,11 @@
   gap: 24px;
   margin-bottom: 35px;
 }
-.library-eyebrow {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  color: #626963;
-  font-weight: 600;
-}
 .library-heading h1 {
   font-size: 32px;
   line-height: 1.25;
   letter-spacing: -1.15px;
-  margin: 9px 0 9px;
+  margin: 0 0 9px;
   font-weight: 600;
 }
 .library-heading p {

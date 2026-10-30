@@ -18,7 +18,8 @@
   A Dot runs in its Space (`dot.spaceId`): chat, files and permissions all go there.
 - The + next to Hearth spins up a new Dot (name only: `POST /api/dots` defaults the instructions to
   `DEFAULT_INSTRUCTIONS` and gives it its own Space and container). The sidebar lists Dots only. A Dot's "…" menu (`DotMenu` in `Sidebar.tsx`) opens its Space's Setup page
-  (`#/spaces/:id/setup`) and its Pages (`#/spaces/:id`). Keep the mascots.
+  (`#/spaces/:id/setup`) and its Pages (`#/spaces/:id`); nothing else goes in that menu. The chat header's
+  API watch button (beside the computer button) opens `#/spaces/:id/watch`. Keep the mascots.
 - Vite + React client (`src/client`), Hono server (`src/server`), shared types (`src/shared`).
 
 ## Sibling repos (github.com/HEARTH-STAR, checked out side by side)
@@ -26,7 +27,7 @@
 - Hearth-frontend (this repo, :4310, dev UI :5173). Remotes: `origin` HEARTH-STAR/Hearth-frontend; `upstream`
   CopilotKit/OpenDots, which is never pushed to.
 - Hearth-Core (`../Hearth-Core`, :5010 inside each Space's container): `/api/chat`, `/api/workspace/*`,
-  `/api/connectors/{github,claude-code,cursor,antigravity}/*`, `/health`. Reached at `http://HEARTH_SPACE_HOST:<port>`, the port
+  `/api/connectors/{github,claude-code,cursor,antigravity}/*`, `/api/watch*`, `/api/core/{version,update}`, `/health`. Reached at `http://HEARTH_SPACE_HOST:<port>`, the port
   Hearth-backend reports for the container's 5010 (it changes when Docker restarts the container).
 - Hearth-backend (`../Hearth-backend`, :5020) at `HEARTH_BACKEND_URL`: `/api/status/docker`, `POST /api/containers`,
   `GET /api/containers/{name}`, `POST /api/containers/{name}/start`; `HEARTH_BACKEND_TOKEN` must equal its
@@ -77,6 +78,20 @@
   `space-routes.ts` (`/api/spaces/:id/agent*`, to the Space's agent connector) proxy that Space's Hearth-Core.
   Claude Code and Antigravity show a code to paste back; Cursor's sign-in finishes on its own and is polled. The app never stores a token or the
   pasted code. Connecting GitHub signs gh in the container out of other github.com accounts, so tests stub it.
+- API watch is per Space and kept in its Hearth-Core (no tables here): `watch-routes.ts` (`/api/spaces/:id/watch*`)
+  proxies `/api/watch*` (spec watches, breaking-change detections, the AI fix and its PR's review and merge through
+  the Space's gh), passing GitHub's 403/404/405/409/422 refusals through. `SpaceWatch.tsx` is the screen
+  (`#/spaces/:id/watch[/:detectionId]`); types are `shared/watch-types.ts`.
+- Repo page (`RepoBrowser.tsx` + RepoFiles/RepoHistory/RepoWatch, `repo-routes.ts` → Hearth-Core `/api/repos*`):
+  `#/spaces/:id/repos/:owner/:name[/:tab[/…]][?ref=&line=]`, tabs Files, Code, Commits, Branches, Activity, Pull requests,
+  API diff (no People). Adding a watch opens it; only watched repos can be browsed.
+- Setup is a console (`SpaceSetup.tsx`, `.console-*` in style.css): identity card (agent tile, Update & restart,
+  status + Stop/Start), Status & Metadata tiles (container, Hearth-Core API, agent sign-in, GitHub), and Machine
+  Logs (`/api/spaces/:id/container/logs`: Hearth-backend's `docker logs`, split by `splitLogs` into Build and Agent).
+- Setup shows the Hearth-Core commit the container runs and, when `main` has a newer one,
+  Update (`/api/spaces/:id/core[/update]`, `SpaceService.coreVersion/updateCore`). Hearth-backend does it first
+  (`/api/containers/{name}/repos[/update]`: git in the container + `docker restart`), which works for any Docker
+  container however old its Hearth-Core; on Azure (501) Hearth-Core updates and restarts itself (`HEARTH_SELF_UPDATE`).
 - Styles: `style.css` is the shell (sidebar, chat, computer, dialogs), `editor.css` is Spaces and the editor.
   Dark mode is generated at build time (`src/build/dark-theme.ts`); wrap intentionally dark surfaces in
   `/* theme: fixed .selector */ … /* theme: end */`.

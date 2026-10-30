@@ -1,5 +1,6 @@
 import { openPageLink } from './page-navigation';
 import { SpaceWorkspace, type SpaceSection } from './SpaceWorkspace';
+import { parseRepoHash, type RepoRoute } from './repo-view';
 import {
   useCallback,
   useEffect,
@@ -9,7 +10,7 @@ import {
 } from 'react';
 import { SignIn, useAuth } from '@clerk/react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
-import { Menu, Monitor, SquarePen, X } from 'lucide-react';
+import { Menu, Monitor, Radar, SquarePen, X } from 'lucide-react';
 import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
 import { api, ApiError, setTokenSource } from './api';
 import {
@@ -50,6 +51,8 @@ export function App() {
   const [spaceId, setSpaceId] = useState('');
   const [section, setSection] = useState<SpaceSection>('pages');
   const [pageId, setPageId] = useState<string>();
+  const [detectionId, setDetectionId] = useState<string>();
+  const [repoRoute, setRepoRoute] = useState<RepoRoute>();
   const setDirtyPage = useCallback((value: boolean) => {
     dirtyPage.current = value;
   }, []);
@@ -65,10 +68,14 @@ export function App() {
   useEffect(() => {
     let acceptedHash = location.hash;
     const navigate = () => {
-      const match = location.hash.match(
-        /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+)|\/(setup))?$/,
-      );
-      if (!match) return;
+      // A watched repo's page: #/spaces/:id/repos/:owner/:name[/:tab[/...]][?ref=…&line=…]
+      const repo = parseRepoHash(location.hash);
+      const match = repo
+        ? null
+        : location.hash.match(
+            /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+)|\/(setup)|\/(watch)(?:\/([^/]+))?)?$/,
+          );
+      if (!repo && !match) return;
       if (dirtyPage.current && location.hash === acceptedHash) return;
       if (
         dirtyPage.current &&
@@ -79,9 +86,19 @@ export function App() {
       }
       acceptedHash = location.hash;
       dirtyPage.current = false;
-      setSpaceId(match[1]);
-      setPageId(match[2]);
-      setSection(match[3] ? 'setup' : 'pages');
+      if (repo) {
+        setSpaceId(repo.spaceId);
+        setPageId(undefined);
+        setSection('repo');
+        setDetectionId(undefined);
+        setRepoRoute(repo);
+      } else if (match) {
+        setSpaceId(match[1]);
+        setPageId(match[2]);
+        setSection(match[3] ? 'setup' : match[4] ? 'watch' : 'pages');
+        setDetectionId(match[5]);
+        setRepoRoute(undefined);
+      }
       rawSetView('space');
       setMobile(false);
     };
@@ -94,6 +111,9 @@ export function App() {
   };
   /** Each Dot is a Space; its Setup page holds the container, its agent and GitHub. */
   const openSetup = (space: string) => openPageLink(`#/spaces/${space}/setup`);
+  /** A Space's API watch, or one detection in it (its changes, fix and pull request). */
+  const openWatch = (space: string, detection?: string) =>
+    openPageLink(`#/spaces/${space}/watch${detection ? `/${detection}` : ''}`);
   const [notices, setNotices] = useState<Notices>({
     refresh: '',
     capture: '',
@@ -280,6 +300,17 @@ export function App() {
       <SquarePen size={17} />
     </button>
   );
+  // The Dot's API watch (its Space's polled specs, breaking changes and fix PRs), beside the computer.
+  const watchButton = (
+    <button
+      className="icon-button"
+      aria-label="API watch"
+      title="API watch"
+      onClick={() => openWatch(dot.spaceId)}
+    >
+      <Radar size={17} />
+    </button>
+  );
   const pickStarter = (text: string) => {
     setPrompt(text);
     requestAnimationFrame(() => focusBlank(promptInput.current, text));
@@ -347,16 +378,20 @@ export function App() {
           )}
           {view === 'space' ? (
             <SpaceWorkspace
-              key={`${spaceId}:${section}`}
+              // Within one repo's page, its tabs and folders keep the page mounted.
+              key={`${spaceId}:${section}${repoRoute && section === 'repo' ? `:${repoRoute.owner}/${repoRoute.name}`.toLowerCase() : ''}`}
               section={section}
               space={
                 workspace.spaces.find((s) => s.id === spaceId) ??
                 workspace.spaces[0]
               }
               pageId={pageId}
+              detectionId={detectionId}
+              repo={repoRoute}
               workspace={workspace}
               paused={paused}
               onPage={(id) => openPage(spaceId, id)}
+              onDetection={(id) => openWatch(spaceId, id)}
               onCreateDot={() => setDialog({ type: 'dot' })}
               onDirty={setDirtyPage}
               onRefresh={refresh}
@@ -385,6 +420,7 @@ export function App() {
                   {conversationMenu}
                 </>
               }
+              besideComputer={watchButton}
               onSaved={refresh}
               onComputer={() => setComputerOpen(!computerOpen)}
               onOpenFile={showFile}
@@ -399,6 +435,7 @@ export function App() {
                 state={paused ? 'paused' : 'idle'}
               >
                 {conversationMenu}
+                {watchButton}
                 <button
                   className={`icon-button ${computerOpen ? 'active' : ''}`}
                   aria-label={computerOpen ? 'Hide computer' : 'Show computer'}

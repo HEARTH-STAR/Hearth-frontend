@@ -1,3 +1,4 @@
+import type { CoreCommit } from '../shared/types.js';
 // Hearth-backend's HTTP API: Docker status, and the containers Spaces run in.
 export interface BackendContainer {
   id: string;
@@ -27,6 +28,16 @@ export class HearthBackendError extends Error {
   }
 }
 type Fetch = typeof fetch;
+/** One template repo in a container, as Hearth-backend reports it. */
+export interface BackendRepo {
+  repo: string;
+  ref: string;
+  path: string;
+  current: CoreCommit | null;
+  latest: CoreCommit | null;
+  update_available: boolean;
+  error: string | null;
+}
 export class HearthBackend {
   constructor(
     readonly url: string,
@@ -105,6 +116,44 @@ export class HearthBackend {
     await this.request(`/api/containers/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
+  }
+  /**
+   * The template's repos inside a running container (a Space's Hearth-Core): the commit each is on and the
+   * newest on its branch, fetched now. Docker only: Azure answers 501.
+   */
+  async repos(name: string): Promise<{ repos: BackendRepo[] }> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/repos`,
+    )) as { repos: BackendRepo[] };
+  }
+  /** Moves those repos to the newest commit of their branch and restarts the container when one moved. */
+  async updateRepos(name: string): Promise<{
+    updated: boolean;
+    restarting: boolean;
+    repos: {
+      repo: string;
+      from: CoreCommit;
+      to: CoreCommit;
+      updated: boolean;
+    }[];
+  }> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/repos/update`,
+      { method: 'POST', body: '{}' },
+    )) as Awaited<ReturnType<HearthBackend['updateRepos']>>;
+  }
+  /** Stops a running container (Docker only; Azure answers 501). Its restart policy leaves it stopped. */
+  async stop(name: string): Promise<BackendContainer> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/stop`,
+      { method: 'POST', body: '{}' },
+    )) as BackendContainer;
+  }
+  /** The last `tail` lines the container's process wrote, oldest first (Docker only; Azure answers 501). */
+  async logs(name: string, tail = 400): Promise<{ lines: string[] }> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/logs?tail=${tail}`,
+    )) as { lines: string[] };
   }
   /** Starts a stopped container; Docker may publish it on new host ports. */
   async start(name: string): Promise<BackendContainer> {
