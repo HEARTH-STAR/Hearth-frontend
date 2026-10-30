@@ -1,7 +1,12 @@
 import type { BaseEvent, Message, RunAgentInput } from '@ag-ui/core';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { lastValueFrom, toArray } from 'rxjs';
 import { afterEach, expect, it } from 'vitest';
 import {
+  apiWatchSection,
   HearthAgent,
   systemPrompt,
   REPLY_FORMAT,
@@ -12,7 +17,10 @@ import { HearthCore, type CoreEvent } from '../src/server/hearth-core.js';
 import { SpaceNotReady } from '../src/server/space-service.js';
 import { pageReviewTool } from '../src/shared/page-review.js';
 import { Store } from '../src/server/store.js';
-import { WorkspaceStore } from '../src/server/workspace.js';
+import {
+  DEFAULT_INSTRUCTIONS,
+  WorkspaceStore,
+} from '../src/server/workspace.js';
 import { fakeFetch, sse } from './helpers.js';
 const open: { close(): void }[] = [];
 afterEach(() => open.splice(0).forEach((item) => item.close()));
@@ -512,4 +520,84 @@ it('ends the turn quietly when the owner stops it, keeping what streamed', async
     'RUN_FINISHED',
   ]);
   expect(workspace.transcript('thread-1').at(-1)?.text).toBe('Half a thou');
+});
+
+it('tells the agent what the Space’s API watch is doing, and where each repo’s code is', () => {
+  const watch = (over: Record<string, unknown>) =>
+    ({
+      id: 'w_0123456789ab',
+      name: 'Stripe',
+      repo: 'SAGARRAMBADE21/accept-a-payment',
+      base_branch: null,
+      status: { spec_version: '2026-09-30.endive', last_error: null },
+      ...over,
+    }) as never;
+  const section = apiWatchSection(
+    {
+      poller: { running: true, tick_at: null, active: null, queue: [] },
+      watches: [watch({})],
+      detections: [
+        {
+          id: 'cr_0123456789ab',
+          watch_id: 'w_0123456789ab',
+          provider: 'Stripe',
+          from_version: '2026-05-27.dahlia',
+          to_version: '2026-09-30.endive',
+          breaking_count: 39,
+          total_count: 490,
+          summary:
+            'POST /v1/payment_intents: param removed (payment_method_types)',
+          fix: {
+            status: 'pr_open',
+            message: null,
+            pr: {
+              number: 1,
+              state: 'open',
+              url: 'https://github.com/x/pull/1',
+            },
+          },
+        } as never,
+      ],
+    },
+    'dots/scout-77049514',
+  )!;
+  expect(section).toContain('API watch, live');
+  expect(section).toContain(
+    '- SAGARRAMBADE21/accept-a-payment (branch default; code checked out at ../../repos/SAGARRAMBADE21/accept-a-payment): watching Stripe (spec 2026-09-30.endive).',
+  );
+  expect(section).toContain(
+    'Stripe 2026-05-27.dahlia -> 2026-09-30.endive: 39 breaking of 490 changes',
+  );
+  expect(section).toContain('PR #1 open (https://github.com/x/pull/1)');
+  expect(section).toContain('Do not edit files there');
+
+  const none = apiWatchSection(
+    {
+      poller: { running: true, tick_at: null, active: null, queue: [] },
+      watches: [],
+      detections: [],
+    },
+    'dots/scout',
+  );
+  expect(none).toContain('no repos are watched yet');
+  // Hearth-Core could not say: nothing about API watch in the prompt
+  expect(apiWatchSection(undefined, 'dots/scout')).toBeUndefined();
+});
+
+it('moves Dots on the old default instructions to the API-watch ones', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hearth-'));
+  const file = join(dir, 'workspace.sqlite');
+  const first = new WorkspaceStore(file, 'owner');
+  const id = first.dots()[0].id;
+  first.close();
+  const legacy =
+    'Be thoughtful, practical, and concise. Read what is in your folder before answering, keep notes as Markdown files, and show drafts for review before saving them to a Space.';
+  const db = new DatabaseSync(file);
+  db.prepare('UPDATE dots SET instructions=? WHERE id=?').run(legacy, id);
+  db.close();
+  const again = new WorkspaceStore(file, 'owner');
+  expect(again.dot(id)?.instructions).toBe(DEFAULT_INSTRUCTIONS);
+  expect(DEFAULT_INSTRUCTIONS).toContain('API-watch agent');
+  again.close();
+  rmSync(dir, { recursive: true, force: true });
 });

@@ -21,6 +21,9 @@ export interface TranscriptEntry {
 }
 /** What a Dot is told when nobody gave it other instructions (every Dot made from the + button). */
 export const DEFAULT_INSTRUCTIONS =
+  "You are this Space's API-watch agent. Hearth watches the public APIs used by the GitHub repos added in API watch; when one ships a breaking change, Hearth finds the affected code, has you fix it, validates the fix with the repo's own commands and opens a pull request for the owner to review. In chat, help the owner with their watched repos, APIs, breaking changes and pull requests: say what changed and what it means for their code, reading the repos' code to answer. Be concise and practical. You can also keep Markdown notes in your folder and show drafts for review before saving them to a Space.";
+/** The default before Dots were API-watch agents; Dots still on it move to the new one. */
+const LEGACY_INSTRUCTIONS =
   'Be thoughtful, practical, and concise. Read what is in your folder before answering, keep notes as Markdown files, and show drafts for review before saving them to a Space.';
 /** Lowercase letters, digits and dashes: safe for a folder and a container name. */
 export function slug(value: string, fallback = 'dot') {
@@ -56,6 +59,9 @@ export class WorkspaceStore {
       CREATE TABLE IF NOT EXISTS transcripts(id INTEGER PRIMARY KEY AUTOINCREMENT, threadId TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS transcripts_thread ON transcripts(threadId, id);
       CREATE TABLE IF NOT EXISTS handoffs(threadId TEXT NOT NULL, toolCallId TEXT NOT NULL, tool TEXT NOT NULL, answered INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(threadId, toolCallId));`);
+    this.db
+      .prepare('UPDATE dots SET instructions=? WHERE instructions=?')
+      .run(DEFAULT_INSTRUCTIONS, LEGACY_INSTRUCTIONS);
     this.computers = new ComputerStore(this.db);
     this.pages = new Pages(this.db, (id) =>
       this.spaces().some((space) => space.id === id),
