@@ -1,24 +1,55 @@
+# The hosted stack on the Azure VM (README: "Hosting on Microsoft Azure"; HEARTH-Deploy sets it up):
+# Postgres and this app. Hearth-backend runs on the host and runs each Dot as an Azure container
+# group. Both networks are made once:
+#
+#   docker network create --internal hearth-db                                   # Postgres; no route out
+#   docker network create --subnet 172.30.0.0/24 --gateway 172.30.0.1 hearth     # this app ⇄ the host
+#
+# 172.30.0.1 is the host on the hearth network: Hearth-backend listens there, not on the public
+# interface. Each Dot's Hearth-Core is reached at its container group's private IP (the `host`
+# Hearth-backend reports), through the VM's network.
 services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: hearth
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: hearth
+    volumes:
+      - hearth-postgres:/var/lib/postgresql/data
+    # No ports: only containers on hearth-db reach it.
+    networks:
+      - hearth-db
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hearth -d hearth']
+      interval: 5s
+      retries: 12
+    restart: unless-stopped
   app:
     build:
       context: .
       target: app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Loopback only: the reverse proxy on the host (HTTPS) is what the internet reaches.
     ports:
       - '127.0.0.1:4310:4310'
     environment:
-      OWNER_TOKEN: ${OWNER_TOKEN:?Set a 24+ character OWNER_TOKEN in .env}
-      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:4310}
-      OWNER_ID: ${OWNER_ID:-hearth-owner}
-      # Hearth-Core and Hearth-backend run on the host by default; they must listen on an
-      # address this container can reach (not only 127.0.0.1).
-      HEARTH_CORE_URL: ${HEARTH_CORE_URL:-http://host.docker.internal:5010}
-      HEARTH_BACKEND_URL: ${HEARTH_BACKEND_URL:-http://host.docker.internal:5020}
-      HEARTH_BACKEND_TOKEN: ${HEARTH_BACKEND_TOKEN:-}
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the URL people open Hearth at}
+      DATABASE_URL: postgres://hearth:${POSTGRES_PASSWORD}@postgres:5432/hearth
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:?Set CLERK_PUBLISHABLE_KEY in .env}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?Set CLERK_SECRET_KEY in .env}
+      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:?Set CLERK_WEBHOOK_SECRET in .env}
+      HEARTH_BACKEND_URL: ${HEARTH_BACKEND_URL:-http://172.30.0.1:5020}
+      HEARTH_BACKEND_TOKEN: ${HEARTH_BACKEND_TOKEN:?Set HEARTH_BACKEND_TOKEN to Hearth-backend's HEARTH_API_TOKEN}
+      HEARTH_SPACE_HOST: ${HEARTH_SPACE_HOST:-172.30.0.1}
       HEARTH_CONTAINER_TEMPLATE: ${HEARTH_CONTAINER_TEMPLATE:-}
       HEARTH_MODEL: ${HEARTH_MODEL:-}
       COPILOTKIT_TELEMETRY_DISABLED: ${COPILOTKIT_TELEMETRY_DISABLED:-true}
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
+    networks:
+      - hearth
+      - hearth-db
     volumes:
       - hearth-data:/data
     init: true
@@ -27,5 +58,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+networks:
+  hearth:
+    external: true
+  hearth-db:
+    external: true
 volumes:
+  hearth-postgres:
   hearth-data:

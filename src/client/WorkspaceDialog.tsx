@@ -1,14 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Dot, State, WorkspaceState } from '../shared/types';
 import {
   AGENT_IDS,
   AGENTS,
   DEFAULT_AGENT,
-  agentOf,
   type AgentId,
 } from '../shared/agents';
-import { STAGE_LABEL } from './space-stage';
 import {
   setThemePreference,
   themePreference,
@@ -22,6 +20,7 @@ export function WorkspaceDialog({
   onClose,
   onDotCreated,
   mutate,
+  account,
 }: {
   dialog: Dialog;
   state: State;
@@ -31,10 +30,10 @@ export function WorkspaceDialog({
   onDotCreated?: (dot: Dot) => void;
   /** The saved value, or false when saving failed. */
   mutate: (path: string, method: string, body?: unknown) => Promise<unknown>;
+  /** Settings' Account section (Clerk's user, AccountSettings.tsx). */
+  account?: ReactNode;
 }) {
-  const [name, setName] = useState(
-    dialog.type === 'settings' ? state.settings.name : '',
-  );
+  const [name, setName] = useState('');
   const [paused, setPaused] = useState(state.settings.paused);
   const [agent, setAgent] = useState<AgentId>(DEFAULT_AGENT);
   const [busy, setBusy] = useState(false);
@@ -72,10 +71,7 @@ export function WorkspaceDialog({
       previous?.focus();
     };
   }, []);
-  const title =
-    dialog.type === 'dot'
-      ? 'Spin up a new Dot.'
-      : 'Your workspace, your rules.';
+  const title = dialog.type === 'dot' ? 'Spin up a new Dot.' : 'Settings';
   const { backend } = workspace.setup;
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -112,7 +108,7 @@ export function WorkspaceDialog({
             if (dialog.type === 'settings') {
               path = '/settings';
               method = 'PATCH';
-              body = { name, paused };
+              body = { paused };
             }
             const saved = await mutate(path, method, body);
             if (saved) {
@@ -123,16 +119,20 @@ export function WorkspaceDialog({
             setBusy(false);
           }}
         >
-          <label className="field-label" htmlFor="entity-name">
-            {dialog.type === 'settings' ? 'Your name' : 'Name'}
-          </label>
-          <input
-            id="entity-name"
-            value={name}
-            maxLength={40}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
+          {dialog.type === 'dot' && (
+            <>
+              <label className="field-label" htmlFor="entity-name">
+                Name
+              </label>
+              <input
+                id="entity-name"
+                value={name}
+                maxLength={40}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </>
+          )}
           {dialog.type === 'dot' && (
             <fieldset className="appearance-fields">
               <legend>Agent</legend>
@@ -166,6 +166,7 @@ export function WorkspaceDialog({
           )}
           {dialog.type === 'settings' && (
             <>
+              {account}
               <label className="permission-row">
                 <input
                   type="checkbox"
@@ -199,39 +200,6 @@ export function WorkspaceDialog({
                   )}
                 </div>
               </fieldset>
-              <div className="config-note">
-                <strong>Services</strong>
-                <p>
-                  <span
-                    className={`online-dot ${backend.reachable && backend.docker !== false ? '' : 'off'}`}
-                  />
-                  Hearth-backend <code>{backend.url}</code>:{' '}
-                  {backend.reachable
-                    ? `connected${backend.detail ? ` (${backend.detail})` : ''}`
-                    : (backend.error ?? 'not reachable')}
-                </p>
-                {workspace.spaces.map((space) => (
-                  <p key={space.id}>
-                    <span
-                      className={`online-dot ${space.stage === 'ready' ? '' : 'off'}`}
-                    />
-                    {space.name}:{' '}
-                    {space.container ? <code>{space.container}</code> : null}{' '}
-                    {STAGE_LABEL[space.stage].toLowerCase()}
-                    {space.stage === 'ready' &&
-                      (space.signedIn
-                        ? `, ${agentOf(space).name} signed in`
-                        : space.signedIn === false
-                          ? `, ${agentOf(space).name} not signed in`
-                          : '')}
-                  </p>
-                ))}
-                <p>
-                  Each Space runs its own Hearth-Core in a container. Set{' '}
-                  <code>HEARTH_BACKEND_URL</code> on the server to point
-                  elsewhere.
-                </p>
-              </div>
             </>
           )}
           {error && (

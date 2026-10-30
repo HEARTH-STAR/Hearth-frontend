@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AgentLogin, AgentLoginState } from '../shared/types.js';
 import { agentStatus } from './connections.js';
+import { HearthBackendError } from './hearth-backend.js';
+import { HearthCoreError } from './hearth-core.js';
 import { spaceFailure, type SpaceService } from './space-service.js';
 
 const session = z
@@ -14,8 +16,9 @@ const code = z
   })
   .strict();
 /**
- * Spaces and their setup: creating one spins up its container; the container's Hearth-Core then
- * signs the Space's agent in (Claude Code, Cursor or Antigravity, through that agent's adapter).
+ * Spaces and their setup. A Space is made with its Dot (``POST /api/dots``, which records who owns
+ * it) and spins up its container; the container's Hearth-Core then signs the Space's agent in
+ * (Claude Code, Cursor or Antigravity, through that agent's adapter).
  * A pasted code passes through once and is never stored or echoed here.
  */
 export function spaceRoutes(spaces: SpaceService) {
@@ -28,21 +31,6 @@ export function spaceRoutes(spaces: SpaceService) {
     console.error('Space request failed:', error);
     return c.json({ error: 'The Space request failed.' }, 500);
   });
-  app.post('/spaces', async (c) => {
-    const data = z
-      .object({
-        name: z.string().trim().min(1).max(60),
-        description: z.string().max(500).default(''),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null));
-    if (!data.success)
-      return c.json(
-        { error: 'Enter a Space name (up to 60 characters).' },
-        400,
-      );
-    return c.json(spaces.create(data.data.name, data.data.description), 201);
-  });
   app.get('/spaces/:id/setup', async (c) =>
     c.json(await spaces.setup(c.req.param('id'))),
   );
@@ -51,6 +39,47 @@ export function spaceRoutes(spaces: SpaceService) {
     const id = c.req.param('id');
     spaces.start(id);
     return c.json(await spaces.setup(id), 202);
+  });
+  /** Stop the container; `POST /container` starts it again. 501 on Azure. */
+  app.post('/spaces/:id/container/stop', async (c) => {
+    const id = c.req.param('id');
+    try {
+      await spaces.stopContainer(id);
+    } catch (error) {
+      if (error instanceof HearthBackendError && error.status === 501)
+        return c.json({ error: error.message }, 501);
+      throw error;
+    }
+    return c.json(await spaces.setup(id));
+  });
+  /** What the container printed lately, split into build and agent lines. */
+  app.get('/spaces/:id/container/logs', async (c) =>
+    c.json(await spaces.containerLogs(c.req.param('id'))),
+  );
+  /** The Hearth-Core the container runs and whether `main` has moved on (see SpaceService.coreVersion). */
+  app.get('/spaces/:id/core', async (c) =>
+    c.json(
+      await spaces.coreVersion(
+        c.req.param('id'),
+        c.req.query('refresh') === 'true',
+      ),
+    ),
+  );
+  /**
+   * Update the container's Hearth-Core to the newest commit and restart it. Refusals (local changes, a
+   * stopped container, a running API watch fix) reach the browser as said, with 409.
+   */
+  app.post('/spaces/:id/core/update', async (c) => {
+    try {
+      return c.json(await spaces.updateCore(c.req.param('id')));
+    } catch (error) {
+      const refused =
+        (error instanceof HearthCoreError &&
+          (error.status === 403 || error.status === 409)) ||
+        (error instanceof HearthBackendError && error.status === 409);
+      if (refused) return c.json({ error: (error as Error).message }, 409);
+      throw error;
+    }
   });
   /** The Space's Hearth-Core and the agent it runs. */
   const agentCore = async (id: string) => ({

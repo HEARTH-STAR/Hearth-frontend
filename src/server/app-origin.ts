@@ -13,8 +13,8 @@ export function resolveAppOrigins(
 }
 /**
  * Why a browser request to ``/api`` is refused (an unknown host, another origin, a cross-site
- * request), or undefined when it may go on. The owner token is checked separately. Plain requests
- * and the terminal's WebSocket upgrade both go through here.
+ * request), or undefined when it may go on. The Clerk session is checked separately. Plain requests,
+ * Clerk's webhook (no Origin) and the terminal's WebSocket upgrade all go through here.
  */
 export function originProblem(
   request: {
@@ -23,7 +23,6 @@ export function originProblem(
     secFetchSite?: string | null;
   },
   origin: string | string[] | undefined,
-  ownerToken: string | undefined,
 ) {
   const requestUrl = new URL(request.url);
   const origins = origin
@@ -48,8 +47,7 @@ export function originProblem(
     '[::1]',
     ...originHostnames,
   ]);
-  if (!ownerToken && !allowedHosts.has(requestUrl.hostname))
-    return 'Unrecognized host.';
+  if (!allowedHosts.has(requestUrl.hostname)) return 'Unrecognized host.';
   const allowedOrigins = new Set(origins ?? [requestUrl.origin]);
   if (request.origin && !allowedOrigins.has(request.origin))
     return 'Cross-origin requests are not allowed.';

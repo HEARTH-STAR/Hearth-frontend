@@ -59,6 +59,7 @@ export function Chat({
   paused,
   computerOpen,
   headerActions,
+  besideComputer,
   onSaved,
   onComputer,
   onOpenFile,
@@ -75,6 +76,8 @@ export function Chat({
   computerOpen?: boolean;
   /** Extra header buttons, such as the conversation picker. */
   headerActions?: ReactNode;
+  /** Buttons shown right before the computer button (API watch). */
+  besideComputer?: ReactNode;
   onSaved: () => void;
   onComputer?: () => void;
   onOpenFile?: (path: string) => void;
@@ -313,6 +316,7 @@ export function Chat({
         >
           <FilePlus size={17} />
         </button>
+        {besideComputer}
         {onComputer && (
           <button
             className={`icon-button ${computerOpen ? 'active' : ''}`}

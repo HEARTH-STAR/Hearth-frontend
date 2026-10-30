@@ -1,5 +1,6 @@
 import { openPageLink } from './page-navigation';
 import { SpaceWorkspace, type SpaceSection } from './SpaceWorkspace';
+import { parseRepoHash, type RepoRoute } from './repo-view';
 import {
   useCallback,
   useEffect,
@@ -7,10 +8,11 @@ import {
   useState,
   type CSSProperties,
 } from 'react';
+import { SignIn, useAuth } from '@clerk/react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
-import { Menu, Monitor, SquarePen, X } from 'lucide-react';
+import { Menu, Monitor, Radar, SquarePen, X } from 'lucide-react';
 import type { Conversation, Dot, State, WorkspaceState } from '../shared/types';
-import { api, ApiError, authHeaders, setToken } from './api';
+import { api, ApiError, setTokenSource } from './api';
 import {
   applyRefreshResult,
   dismissNotice,
@@ -30,6 +32,7 @@ import { ConversationMenu } from './ConversationMenu';
 import { DotHeader } from './DotHeader';
 import { latestConversation, Sidebar } from './Sidebar';
 import { WorkspaceDialog, type Dialog } from './WorkspaceDialog';
+import { AccountSettings } from './AccountSettings';
 
 function describeFailure(error: unknown, fallback: string) {
   return {
@@ -48,6 +51,8 @@ export function App() {
   const [spaceId, setSpaceId] = useState('');
   const [section, setSection] = useState<SpaceSection>('pages');
   const [pageId, setPageId] = useState<string>();
+  const [detectionId, setDetectionId] = useState<string>();
+  const [repoRoute, setRepoRoute] = useState<RepoRoute>();
   const setDirtyPage = useCallback((value: boolean) => {
     dirtyPage.current = value;
   }, []);
@@ -63,10 +68,14 @@ export function App() {
   useEffect(() => {
     let acceptedHash = location.hash;
     const navigate = () => {
-      const match = location.hash.match(
-        /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+)|\/(setup))?$/,
-      );
-      if (!match) return;
+      // A watched repo's page: #/spaces/:id/repos/:owner/:name[/:tab[/...]][?ref=…&line=…]
+      const repo = parseRepoHash(location.hash);
+      const match = repo
+        ? null
+        : location.hash.match(
+            /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+)|\/(setup)|\/(watch)(?:\/([^/]+))?)?$/,
+          );
+      if (!repo && !match) return;
       if (dirtyPage.current && location.hash === acceptedHash) return;
       if (
         dirtyPage.current &&
@@ -77,9 +86,19 @@ export function App() {
       }
       acceptedHash = location.hash;
       dirtyPage.current = false;
-      setSpaceId(match[1]);
-      setPageId(match[2]);
-      setSection(match[3] ? 'setup' : 'pages');
+      if (repo) {
+        setSpaceId(repo.spaceId);
+        setPageId(undefined);
+        setSection('repo');
+        setDetectionId(undefined);
+        setRepoRoute(repo);
+      } else if (match) {
+        setSpaceId(match[1]);
+        setPageId(match[2]);
+        setSection(match[3] ? 'setup' : match[4] ? 'watch' : 'pages');
+        setDetectionId(match[5]);
+        setRepoRoute(undefined);
+      }
       rawSetView('space');
       setMobile(false);
     };
@@ -92,6 +111,9 @@ export function App() {
   };
   /** Each Dot is a Space; its Setup page holds the container, its agent and GitHub. */
   const openSetup = (space: string) => openPageLink(`#/spaces/${space}/setup`);
+  /** A Space's API watch, or one detection in it (its changes, fix and pull request). */
+  const openWatch = (space: string, detection?: string) =>
+    openPageLink(`#/spaces/${space}/watch${detection ? `/${detection}` : ''}`);
   const [notices, setNotices] = useState<Notices>({
     refresh: '',
     capture: '',
@@ -102,8 +124,9 @@ export function App() {
     setNotices((current) =>
       current.action === action ? current : { ...current, action },
     );
-  const [auth, setAuth] = useState('');
-  const [needsAuth, setNeedsAuth] = useState(false);
+  // Clerk holds the session; every API request carries its token.
+  const { isLoaded, isSignedIn, getToken } = useAuth();
+  setTokenSource(getToken);
   const [dialog, setDialog] = useState<Dialog>();
   const [mobile, setMobile] = useState(false);
   // Beside the conversation on wide screens; on narrow ones it covers it, so it starts closed.
@@ -142,7 +165,6 @@ export function App() {
       ]);
       setState(s);
       setWorkspace(w);
-      setNeedsAuth(false);
       if (!loaded.current && w.dots[0]) {
         // Open where the owner left off: the first Dot's latest conversation.
         loaded.current = true;
@@ -153,7 +175,6 @@ export function App() {
       }
       setNotices((current) => applyRefreshResult(current, { ok: true }));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setNeedsAuth(true);
       setNotices((current) =>
         applyRefreshResult(
           current,
@@ -163,10 +184,11 @@ export function App() {
     }
   }, []);
   useEffect(() => {
+    if (!isSignedIn) return;
     void refresh();
     const timer = setInterval(() => void refresh(), 3000);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, isSignedIn]);
   /** The saved value, or false when the request failed (its error shows in the banner). */
   const mutate = async (path: string, method: string, body?: unknown) => {
     setError('');
@@ -234,45 +256,12 @@ export function App() {
       setBusy(false);
     }
   };
-  if (needsAuth)
+  // Sign-in and sign-up (username and password) are Clerk's.
+  if (isLoaded && !isSignedIn)
     return (
       <main className="unlock">
         <Mascot />
-        <h1>Your own little corner.</h1>
-        <p>Enter the owner access token configured on this Hearth server.</p>
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setToken(auth);
-            try {
-              await api('/state');
-              setError('');
-              await refresh();
-            } catch (err) {
-              setError(
-                err instanceof Error
-                  ? err.message
-                  : 'Access token was not accepted.',
-              );
-            }
-          }}
-        >
-          <input
-            type="password"
-            aria-label="Owner access token"
-            autoComplete="current-password"
-            value={auth}
-            onChange={(e) => setAuth(e.target.value)}
-            required
-          />
-          <button className="primary">Unlock Hearth</button>
-        </form>
-        {error && (
-          <p className="chat-error" role="alert">
-            {error}
-          </p>
-        )}
-        <p className="muted">The token stays in this tab’s session storage.</p>
+        <SignIn routing="hash" withSignUp />
       </main>
     );
   if (!state || !workspace || !dot)
@@ -326,6 +315,17 @@ export function App() {
       <SquarePen size={17} />
     </button>
   );
+  // The Dot's API watch (its Space's polled specs, breaking changes and fix PRs), beside the computer.
+  const watchButton = (
+    <button
+      className="icon-button"
+      aria-label="API watch"
+      title="API watch"
+      onClick={() => openWatch(dot.spaceId)}
+    >
+      <Radar size={17} />
+    </button>
+  );
   const pickStarter = (text: string) => {
     setPrompt(text);
     requestAnimationFrame(() => focusBlank(promptInput.current, text));
@@ -334,7 +334,6 @@ export function App() {
   return (
     <CopilotKitProvider
       runtimeUrl="/api/copilotkit"
-      headers={authHeaders()}
       // CopilotKit's dev Inspector advertises cloud features Hearth does not use; opt in to debug.
       enableInspector={import.meta.env.VITE_COPILOTKIT_INSPECTOR === 'true'}
     >
@@ -394,16 +393,20 @@ export function App() {
           )}
           {view === 'space' ? (
             <SpaceWorkspace
-              key={`${spaceId}:${section}`}
+              // Within one repo's page, its tabs and folders keep the page mounted.
+              key={`${spaceId}:${section}${repoRoute && section === 'repo' ? `:${repoRoute.owner}/${repoRoute.name}`.toLowerCase() : ''}`}
               section={section}
               space={
                 workspace.spaces.find((s) => s.id === spaceId) ??
                 workspace.spaces[0]
               }
               pageId={pageId}
+              detectionId={detectionId}
+              repo={repoRoute}
               workspace={workspace}
               paused={paused}
               onPage={(id) => openPage(spaceId, id)}
+              onDetection={(id) => openWatch(spaceId, id)}
               onCreateDot={() => setDialog({ type: 'dot' })}
               onDirty={setDirtyPage}
               onRefresh={refresh}
@@ -432,6 +435,7 @@ export function App() {
                   {conversationMenu}
                 </>
               }
+              besideComputer={watchButton}
               onSaved={refresh}
               onComputer={() => setComputerOpen(!computerOpen)}
               onOpenFile={showFile}
@@ -446,6 +450,7 @@ export function App() {
                 state={paused ? 'paused' : 'idle'}
               >
                 {conversationMenu}
+                {watchButton}
                 <button
                   className={`icon-button ${computerOpen ? 'active' : ''}`}
                   aria-label={computerOpen ? 'Hide computer' : 'Show computer'}
@@ -511,6 +516,7 @@ export function App() {
             onClose={() => setDialog(undefined)}
             onDotCreated={(created) => openSetup(created.spaceId)}
             mutate={mutate}
+            account={<AccountSettings onClose={() => setDialog(undefined)} />}
           />
         )}
       </div>

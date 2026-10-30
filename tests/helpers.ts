@@ -1,4 +1,13 @@
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import { randomBytes } from 'node:crypto';
+import { beforeAll } from 'vitest';
 import { createApp } from '../src/server/app.js';
+import type { Auth } from '../src/server/auth.js';
+import { AccountStore } from '../src/server/db/accounts.js';
+import { MIGRATIONS_FOLDER, type Database } from '../src/server/db/index.js';
+import * as schema from '../src/server/db/schema.js';
 import { configFromEnv } from '../src/server/config.js';
 import { HearthBackend } from '../src/server/hearth-backend.js';
 import { HearthCore, type CoreEvent } from '../src/server/hearth-core.js';
@@ -70,10 +79,41 @@ export const runningSpace = (
     status: 'running',
     ports,
   });
+let shared: { db: Database; ready: Promise<unknown> } | undefined;
+/**
+ * One in-memory Postgres per test file, migrated from drizzle/ like the real one. Fixtures share it:
+ * every Dot id is a fresh UUID, and each test signs in as users it names.
+ */
+export function testDatabase() {
+  if (!shared) {
+    const db = drizzle(new PGlite(), { schema });
+    shared = {
+      db: db as unknown as Database,
+      ready: migrate(db, { migrationsFolder: MIGRATIONS_FOLDER }),
+    };
+  }
+  return shared;
+}
+// Starting PGlite takes seconds (more while every worker starts one), so each file using these
+// helpers waits for it once, before its first test, rather than inside one.
+beforeAll(() => testDatabase().ready, 120_000);
+/** The Clerk user every fixture request is signed in as, unless it sends ``X-Test-User``. */
+export const OWNER = 'user_owner';
+/** Signs a request in as ``userId`` (an empty string: signed out). */
+export const as = (userId: string, init: RequestInit = {}): RequestInit => ({
+  ...init,
+  headers: {
+    ...(init.headers as Record<string, string>),
+    'X-Test-User': userId,
+  },
+});
+/** A Svix signing secret, as Clerk shows it for a webhook endpoint. */
+export const WEBHOOK_SECRET = `whsec_${randomBytes(24).toString('base64')}`;
 export function fixture(
   options: {
-    ownerToken?: string;
     origin?: string | string[];
+    /** What Clerk says a user's username is (default: ``<id>-name``). */
+    username?: Auth['username'];
     core?: Record<string, Route>;
     backend?: Record<string, Route>;
     /** Give the seeded Space a running container (default), or leave it without one. */
@@ -82,6 +122,23 @@ export function fixture(
 ) {
   const store = new Store(':memory:');
   const workspace = new WorkspaceStore(':memory:', 'owner');
+  const database = testDatabase();
+  const accounts = new AccountStore(database.db);
+  // The seeded Space is OWNER's Dot, as if they had made it.
+  const seeded = workspace.spaces()[0].id;
+  const ready = database.ready
+    .then(() => accounts.saveUser(OWNER, 'owner'))
+    .then(() => accounts.addDot(seeded, 'Scout', OWNER));
+  // A test that never calls the API never waits for it.
+  ready.catch(() => {});
+  const auth: Auth = {
+    async authenticate(request) {
+      await ready;
+      const user = request.headers.get('X-Test-User');
+      return user === null ? OWNER : user || null;
+    },
+    username: options.username ?? (async (userId) => `${userId}-name`),
+  };
   if (options.container !== false)
     workspace.setSpaceContainer(workspace.spaces()[0].id, SPACE_CONTAINER);
   const core = fakeFetch({ ...healthy, ...options.core });
@@ -96,6 +153,7 @@ export function fixture(
   const cores: string[] = [];
   const platform = new Platform(store, workspace, config, {
     threadsDatabase: ':memory:',
+    ownerOf: (spaceId) => accounts.ownerOf(spaceId),
     backend: new HearthBackend('http://backend.test', undefined, backend.fetch),
     coreAt: (url) => {
       cores.push(url);
@@ -105,13 +163,21 @@ export function fixture(
   const app = createApp({
     store,
     platform,
-    ownerToken: options.ownerToken,
+    accounts,
+    auth,
+    clerk: {
+      publishableKey: 'pk_test_Y2xlcmsuZXhhbXBsZS5jb20k',
+      webhookSecret: WEBHOOK_SECRET,
+    },
     origin: options.origin,
   });
   return {
     store,
     workspace,
     platform,
+    accounts,
+    db: database.db,
+    ready,
     app,
     core,
     cores,

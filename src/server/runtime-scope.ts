@@ -2,11 +2,13 @@ import { WorkspaceStore } from './workspace.js';
 /**
  * Lets through only the CopilotKit runtime routes the web app uses (SSE mode), and only for a
  * Dot and a conversation this owner has: ``info``, and ``agent/:dotId/run|connect|stop``.
+ * ``owns`` says whether the signed-in user owns a Dot; one they do not own counts as unknown.
  */
 export function validateRuntimeScope(
   request: Request,
   workspace: WorkspaceStore,
   body: unknown,
+  owns: (dotId: string) => boolean = () => true,
 ): void {
   const url = new URL(request.url);
   const prefix = '/api/copilotkit/';
@@ -45,7 +47,9 @@ export function validateRuntimeScope(
   for (const candidate of [agentId, bodyAgent, queryAgent]) {
     if (
       candidate &&
-      (!workspace.dot(candidate) || (agentId && candidate !== agentId))
+      (!workspace.dot(candidate) ||
+        !owns(candidate) ||
+        (agentId && candidate !== agentId))
     )
       return deny();
   }

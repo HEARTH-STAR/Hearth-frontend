@@ -11,6 +11,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev && mkdir -p /data && chown node:node /data
 COPY --from=build /app/dist ./dist
+# The server applies these at start (src/server/db/index.ts), before it listens.
+COPY --from=build /app/drizzle ./drizzle
 USER node
 EXPOSE 4310
 CMD ["node", "dist/server/server/index.js"]

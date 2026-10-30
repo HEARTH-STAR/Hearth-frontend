@@ -5,17 +5,26 @@ import type { Space, WorkspaceState } from '../shared/types';
 import { api } from './api';
 import { SpaceLibrary } from './SpaceLibrary';
 import { SpaceSetup } from './SpaceSetup';
+import { SpaceWatch } from './SpaceWatch';
+import { RepoBrowser } from './RepoBrowser';
+import type { RepoRoute } from './repo-view';
 import { PageDocument } from './PageDocument';
 import { PageOutline } from './PageOutline';
-export type SpaceSection = 'pages' | 'setup';
-/** A Dot's Space: its Setup page (container, Claude Code, GitHub) or its Pages, and one page. */
+export type SpaceSection = 'pages' | 'setup' | 'watch' | 'repo';
+/**
+ * A Dot's Space: its Setup page (container, Claude Code, GitHub), its API watch and the repos it watches,
+ * or its Pages and one page.
+ */
 export function SpaceWorkspace({
   space,
   section,
   pageId,
+  detectionId,
+  repo,
   workspace,
   paused,
   onPage,
+  onDetection,
   onDirty,
   onRefresh,
   onThread,
@@ -24,9 +33,14 @@ export function SpaceWorkspace({
   space: Space;
   section: SpaceSection;
   pageId?: string;
+  /** The API watch detection open in the watch section. */
+  detectionId?: string;
+  /** The watched repo open in the repo section, and where on its page. */
+  repo?: RepoRoute;
   workspace: WorkspaceState;
   paused: boolean;
   onPage: (id?: string) => void;
+  onDetection: (id?: string) => void;
   onDirty: (value: boolean) => void;
   onRefresh: () => void;
   onThread: (threadId: string) => void;
@@ -38,7 +52,7 @@ export function SpaceWorkspace({
   const [loaded, setLoaded] = useState(false);
   const [outline, setOutline] = useState(false);
   useEffect(() => {
-    if (section === 'setup') return;
+    if (section !== 'pages') return;
     let active = true;
     const load = async () => {
       try {
@@ -107,14 +121,34 @@ export function SpaceWorkspace({
       )}
       {section === 'setup' ? (
         <section className="space-library" aria-label={`${space.name} setup`}>
+          <SpaceSetup space={space} onChanged={onRefresh} />
+        </section>
+      ) : section === 'repo' && repo ? (
+        <section
+          className="space-library repo-library"
+          aria-label={`${repo.owner}/${repo.name} in ${space.name}`}
+        >
+          <RepoBrowser space={space} route={repo} />
+        </section>
+      ) : section === 'watch' ? (
+        <section
+          className="space-library"
+          aria-label={`${space.name} API watch`}
+        >
           <header className="library-heading">
             <div>
-              <span className="library-eyebrow">SPACE</span>
-              <h1>{space.name}</h1>
-              {space.description && <p>{space.description}</p>}
+              <h1>API watch</h1>
+              <p>
+                {space.name} polls OpenAPI specs. When one breaks, its agent
+                fixes the repo, validates the fix and opens a pull request.
+              </p>
             </div>
           </header>
-          <SpaceSetup space={space} onChanged={onRefresh} />
+          <SpaceWatch
+            space={space}
+            detectionId={detectionId}
+            onDetection={onDetection}
+          />
         </section>
       ) : !pageId ? (
         <SpaceLibrary

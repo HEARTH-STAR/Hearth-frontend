@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import postcss from 'postcss';
 import {
@@ -102,6 +103,12 @@ it('keeps fixed surfaces in their light colors, untouched by global rules', () =
   );
   expect(css).not.toMatch(/dark'\] from/);
   expect(css).not.toContain("'dark'] .logo");
+});
+it("leaves Clerk's sign-in to Clerk's own colors", () => {
+  const css = run(readFileSync('src/client/style.css', 'utf8'));
+  const dark = css.match(/:root\[data-theme='dark'\] button:not\([^)]*\)/)![0];
+  expect(dark).toContain("[class^='cl-'] *");
+  expect(dark).toContain("[class*=' cl-'] *");
 });
 it('resolves the system preference', () => {
   expect(resolveTheme('system', true)).toBe('dark');

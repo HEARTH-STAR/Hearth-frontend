@@ -1,3 +1,4 @@
+import type { CoreCommit } from '../shared/types.js';
 // Hearth-backend's HTTP API: Docker status, and the containers Spaces run in.
 export interface BackendContainer {
   id: string;
@@ -7,8 +8,16 @@ export interface BackendContainer {
   image: string;
   /** Docker's status: running, exited, created, … */
   status: string;
-  /** Container port → the 127.0.0.1 port Docker published it on, e.g. ``{"5010": 49153}``. */
+  /**
+   * Container port → the port to reach it on at ``host``: the host port Docker published it on, e.g.
+   * ``{"5010": 49153}``, or on Azure the same port, ``{"5010": 5010}``.
+   */
   ports?: Record<string, number>;
+  /**
+   * Where to reach ``ports``: Hearth-backend's publish host (Docker), or the container group's current private
+   * IP (Azure; null while it has none). Older Hearth-backends leave it out.
+   */
+  host?: string | null;
 }
 export class HearthBackendError extends Error {
   constructor(
@@ -19,6 +28,16 @@ export class HearthBackendError extends Error {
   }
 }
 type Fetch = typeof fetch;
+/** One template repo in a container, as Hearth-backend reports it. */
+export interface BackendRepo {
+  repo: string;
+  ref: string;
+  path: string;
+  current: CoreCommit | null;
+  latest: CoreCommit | null;
+  update_available: boolean;
+  error: string | null;
+}
 export class HearthBackend {
   constructor(
     readonly url: string,
@@ -91,6 +110,50 @@ export class HearthBackend {
     return (await this.request(`/api/containers/${encodeURIComponent(name)}`, {
       signal,
     })) as BackendContainer;
+  }
+  /** Removes a container, running or not, with its workspace; a 404 means it was already gone. */
+  async remove(name: string): Promise<void> {
+    await this.request(`/api/containers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+  }
+  /**
+   * The template's repos inside a running container (a Space's Hearth-Core): the commit each is on and the
+   * newest on its branch, fetched now. Docker only: Azure answers 501.
+   */
+  async repos(name: string): Promise<{ repos: BackendRepo[] }> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/repos`,
+    )) as { repos: BackendRepo[] };
+  }
+  /** Moves those repos to the newest commit of their branch and restarts the container when one moved. */
+  async updateRepos(name: string): Promise<{
+    updated: boolean;
+    restarting: boolean;
+    repos: {
+      repo: string;
+      from: CoreCommit;
+      to: CoreCommit;
+      updated: boolean;
+    }[];
+  }> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/repos/update`,
+      { method: 'POST', body: '{}' },
+    )) as Awaited<ReturnType<HearthBackend['updateRepos']>>;
+  }
+  /** Stops a running container (Docker only; Azure answers 501). Its restart policy leaves it stopped. */
+  async stop(name: string): Promise<BackendContainer> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/stop`,
+      { method: 'POST', body: '{}' },
+    )) as BackendContainer;
+  }
+  /** The last `tail` lines the container's process wrote, oldest first (Docker only; Azure answers 501). */
+  async logs(name: string, tail = 400): Promise<{ lines: string[] }> {
+    return (await this.request(
+      `/api/containers/${encodeURIComponent(name)}/logs?tail=${tail}`,
+    )) as { lines: string[] };
   }
   /** Starts a stopped container; Docker may publish it on new host ports. */
   async start(name: string): Promise<BackendContainer> {

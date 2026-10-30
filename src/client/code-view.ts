@@ -97,3 +97,29 @@ export async function highlight(text: string, path: string) {
     return null; // a language Shiki does not know
   }
 }
+
+/** One highlighted run of a line. */
+export interface CodeToken {
+  content: string;
+  color?: string;
+}
+/** The text as lines of colored runs, for a view with its own line numbers; null for plain text. */
+export async function highlightLines(
+  text: string,
+  path: string,
+): Promise<CodeToken[][] | null> {
+  const lang = languageFor(path);
+  if (lang === 'text' || text.length > HIGHLIGHT_LIMIT) return null;
+  const { codeToTokens } = await import('shiki');
+  try {
+    const { tokens } = await codeToTokens(text, {
+      lang: lang as never,
+      theme: structuredClone(pierreDark) as never,
+    });
+    return tokens.map((line) =>
+      line.map((token) => ({ content: token.content, color: token.color })),
+    );
+  } catch {
+    return null; // a language Shiki does not know
+  }
+}

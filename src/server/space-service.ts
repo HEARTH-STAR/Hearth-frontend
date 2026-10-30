@@ -1,6 +1,9 @@
 import { AGENTS, DEFAULT_AGENT, type AgentId } from '../shared/agents.js';
 import type {
   AgentStatus,
+  ContainerLogs,
+  CoreUpdate,
+  CoreVersion,
   Space,
   SpaceSetup,
   SpaceStage,
@@ -14,8 +17,29 @@ import {
   type HearthBackend,
 } from './hearth-backend.js';
 import { HearthCore, HearthCoreError } from './hearth-core.js';
-import { slug, type WorkspaceStore } from './workspace.js';
+import type { WorkspaceStore } from './workspace.js';
 
+// The start script's own lines, and what pip prints while it installs Hearth-Core's requirements.
+const BUILD_LINE =
+  /^(hearth-space:|hearth-clone:|install-agent-cli|Collecting |Downloading |Installing |Successfully |Requirement already|Building |Using cached |\s+(Downloading|Building|Installing|Using|Created|Stored))/;
+// Hearth-frontend polls these every few seconds; they would bury everything else.
+const POLL_LINE =
+  /"GET \/(health|api\/connectors\/[\w-]+\/status|api\/core\/version|api\/watch)\b[^"]*" 200/;
+/** Split a container's output into its start-up (build) lines and Hearth-Core's own (agent) lines. */
+export function splitLogs(lines: string[]) {
+  const build: string[] = [];
+  const agent: string[] = [];
+  for (const line of lines) {
+    if (BUILD_LINE.test(line)) build.push(line);
+    else if (!POLL_LINE.test(line)) agent.push(line);
+  }
+  return { agent, build };
+}
+/** Hearth-backend cannot read a container's repos: Azure (501), or a Hearth-backend from before it (404). */
+const backendCannot = (error: unknown) =>
+  error instanceof HearthBackendError &&
+  (error.status === 501 ||
+    (error.status === 404 && error.message === 'Not Found'));
 /** The container port the ``space`` template runs Hearth-Core on. */
 export const CORE_PORT = '5010';
 const FRESH_MS = 4000;
@@ -94,15 +118,36 @@ export class SpaceService {
     if (!space) throw new Error('Space not found.');
     return space;
   }
-  /** The name Hearth-backend gets (it adds its own prefix). */
+  /** The name Hearth-backend gets; it adds its prefix, so the container is ``hearth-container-<dot_id>``. */
   containerName(space: StoredSpace) {
-    return `${slug(space.name, 'space')}-${space.id.slice(0, 8)}`;
+    return space.id;
   }
-  /** A new Space running ``agent``, its container already on the way. */
-  create(name: string, description: string, agent: AgentId = DEFAULT_AGENT) {
-    const space = this.workspace.createSpace(name, description, agent);
+  /** A new Space running ``agent``, its container already on the way. ``id`` is its Dot's id. */
+  create(
+    name: string,
+    description: string,
+    agent: AgentId = DEFAULT_AGENT,
+    id?: string,
+  ) {
+    const space = this.workspace.createSpace(name, description, agent, id);
     this.start(space.id);
     return space;
+  }
+  /**
+   * Removes the Space's container through Hearth-backend, after a spin-up in flight has ended (or
+   * it would come back). A container Docker no longer has counts as removed.
+   */
+  async remove(spaceId: string) {
+    await this.settled(spaceId);
+    const space = this.workspace.space(spaceId);
+    if (!space) return;
+    try {
+      await this.backend.remove(space.container ?? this.containerName(space));
+    } catch (error) {
+      if (!missing(error)) throw friendly(error);
+    }
+    this.failures.delete(spaceId);
+    this.forget(spaceId);
   }
   /**
    * Spins up the Space's container, starts it again when it was stopped, or replaces it when
@@ -231,7 +276,8 @@ export class SpaceService {
         url: null,
         error: `The container does not publish Hearth-Core’s port ${CORE_PORT}; spaces need the “space” template.`,
       };
-    const url = `http://${this.config.spaceHost}:${port}`;
+    // On Azure the container's private IP, which can change when it restarts; HEARTH_SPACE_HOST otherwise.
+    const url = `http://${container.host || this.config.spaceHost}:${port}`;
     try {
       await this.client(url).health(AbortSignal.timeout(PROBE_TIMEOUT_MS));
       return { stage: 'ready', status, url };
@@ -246,6 +292,105 @@ export class SpaceService {
     if (probe.stage !== 'ready' || !probe.url)
       throw new SpaceNotReady(notReady(space, probe), probe.stage);
     return this.client(probe.url);
+  }
+  /**
+   * The Hearth-Core the Space's container runs and the newest commit of its branch (`main`). Hearth-backend
+   * reads it with git in the container, which works for every Docker container, however old its Hearth-Core;
+   * where it cannot (Azure: 501, or a Hearth-backend from before this: 404) Hearth-Core answers for itself.
+   */
+  async coreVersion(spaceId: string, refresh = false): Promise<CoreVersion> {
+    const space = this.space(spaceId);
+    try {
+      const { repos } = await this.backend.repos(
+        space.container ?? this.containerName(space),
+      );
+      const repo =
+        repos.find((r) => r.path.endsWith('/hearth-core')) ?? repos[0];
+      if (repo)
+        return {
+          supported: true,
+          enabled: true,
+          branch: repo.ref,
+          current: repo.current,
+          latest: repo.latest,
+          updateAvailable: repo.update_available,
+          checkedAt: new Date().toISOString(),
+          error: repo.error,
+        };
+    } catch (error) {
+      if (!backendCannot(error)) throw error;
+    }
+    const core = await this.core(space.id);
+    try {
+      const v = await core.coreVersion(refresh);
+      return {
+        supported: true,
+        enabled: v.enabled,
+        branch: v.branch,
+        current: v.current,
+        latest: v.latest,
+        updateAvailable: v.update_available,
+        checkedAt: v.checked_at,
+        error: v.error,
+      };
+    } catch (error) {
+      if (!(error instanceof HearthCoreError && error.status === 404))
+        throw error;
+      return {
+        supported: false,
+        enabled: false,
+        branch: null,
+        current: null,
+        latest: null,
+        updateAvailable: false,
+        checkedAt: null,
+        error: null,
+      };
+    }
+  }
+  /**
+   * Move the Space's Hearth-Core to the newest commit and restart it: Hearth-backend resets the checkout and
+   * restarts the container, or (Azure) Hearth-Core updates and restarts itself.
+   */
+  async updateCore(spaceId: string): Promise<CoreUpdate> {
+    const space = this.space(spaceId);
+    try {
+      const result = await this.backend.updateRepos(
+        space.container ?? this.containerName(space),
+      );
+      const repo =
+        result.repos.find((r) => r.repo.endsWith('/Hearth-Core')) ??
+        result.repos[0];
+      this.probes.delete(space.id);
+      return {
+        updated: result.updated,
+        restarting: result.restarting,
+        from: repo.from,
+        to: repo.to,
+      };
+    } catch (error) {
+      if (!backendCannot(error)) throw error;
+    }
+    return (await this.core(space.id)).coreUpdate();
+  }
+  /** Stop the Space's container; Start again (`start`) brings it back. */
+  async stopContainer(spaceId: string) {
+    const space = this.space(spaceId);
+    await this.backend.stop(space.container ?? this.containerName(space));
+    this.probes.delete(space.id);
+  }
+  /** The container's recent output, split into its start-up (build) and Hearth-Core's own (agent) lines. */
+  async containerLogs(spaceId: string): Promise<ContainerLogs> {
+    const space = this.space(spaceId);
+    try {
+      const { lines } = await this.backend.logs(
+        space.container ?? this.containerName(space),
+      );
+      return { supported: true, ...splitLogs(lines) };
+    } catch (error) {
+      if (!backendCannot(error)) throw error;
+      return { supported: false, agent: [], build: [] };
+    }
   }
   /** Why the Space cannot run turns right now, or undefined when it can. */
   async blocker(spaceId: string) {
@@ -270,14 +415,18 @@ export class SpaceService {
   agentChanged(spaceId: string) {
     this.agents.delete(spaceId);
   }
-  async list(): Promise<Space[]> {
+  /** The Spaces whose ids are in ``only`` (default: every Space), each with its container's stage. */
+  async list(only?: ReadonlySet<string>): Promise<Space[]> {
+    const spaces = this.workspace.spaces();
     return Promise.all(
-      this.workspace.spaces().map(async (space) => {
-        const { stage } = await this.probe(space.id);
-        const agent =
-          stage === 'ready' ? await this.agentStatus(space.id) : null;
-        return { ...space, stage, signedIn: agent ? agent.connected : null };
-      }),
+      (only ? spaces.filter((space) => only.has(space.id)) : spaces).map(
+        async (space) => {
+          const { stage } = await this.probe(space.id);
+          const agent =
+            stage === 'ready' ? await this.agentStatus(space.id) : null;
+          return { ...space, stage, signedIn: agent ? agent.connected : null };
+        },
+      ),
     );
   }
   async setup(spaceId: string): Promise<SpaceSetup> {

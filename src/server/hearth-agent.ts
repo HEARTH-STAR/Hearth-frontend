@@ -6,11 +6,13 @@ import {
   type RunAgentInput,
 } from '@ag-ui/core';
 import { randomUUID } from 'node:crypto';
+import { posix } from 'node:path';
 import { Observable } from 'rxjs';
 import { z } from 'zod';
 import { pageReviewTool } from '../shared/page-review.js';
 import { shortPath } from '../shared/paths.js';
 import type { Dot, Settings, StoredSpace } from '../shared/types.js';
+import type { WatchOverview } from '../shared/watch-types.js';
 import type { HearthConfig } from './config.js';
 import type {
   ChatSpec,
@@ -29,6 +31,8 @@ export interface HearthAgentDeps {
   /** The Hearth-Core in a Space's container; throws when that Space is not ready. */
   core: (spaceId: string) => Promise<HearthCore>;
   config: Pick<HearthConfig, 'model'>;
+  /** The user who owns a Space, whose settings (name, paused) the Dot runs under. */
+  ownerOf?: (spaceId: string) => Promise<string | undefined>;
 }
 /** Hearth-Core serves the web app's tools to Claude Code under this MCP prefix. */
 const CLIENT_TOOL_PREFIX = 'mcp__client__';
@@ -99,18 +103,63 @@ export function previewOf(text: string) {
  */
 export const REPLY_FORMAT =
   'Format replies in Markdown. The Hearth app shows each "## " section as a card. For anything longer than a few sentences, open with one or two plain sentences that answer directly, then give each part its own "## " heading with a short title, keeping each section focused. Use lists, tables and fenced code blocks (with a language) inside sections where they help. A short answer needs no headings.';
+/**
+ * The Space's API watch as the agent should know it: each watched repo with its APIs, where its code is
+ * checked out (relative to the Dot's folder), and its breaking changes with their fix and pull request.
+ * Undefined when Hearth-Core could not say (an older one, or not reachable): the prompt then leaves it out.
+ */
+export function apiWatchSection(
+  overview: WatchOverview | undefined,
+  directory: string,
+): string | undefined {
+  if (!overview) return undefined;
+  const { watches, detections } = overview;
+  if (!watches.length)
+    return 'API watch: no repos are watched yet. The owner adds one from the API watch button (beside the computer button) by pasting a GitHub clone URL; Hearth then finds the APIs the repo uses and watches them.';
+  const repos = [...new Set(watches.map((watch) => watch.repo))].sort();
+  const lines = repos.map((repo) => {
+    const own = watches.filter((watch) => watch.repo === repo);
+    const branch = own.find((watch) => watch.base_branch)?.base_branch;
+    const code = posix.relative(directory || '.', `repos/${repo}`);
+    const apis = own
+      .map(
+        (watch) =>
+          `${watch.name} (spec ${watch.status.spec_version ?? 'not read yet'}${watch.status.last_error ? `; last check failed: ${watch.status.last_error}` : ''})`,
+      )
+      .join(', ');
+    const breaking = detections
+      .filter((d) => own.some((watch) => watch.id === d.watch_id))
+      .slice(0, 5)
+      .map((d) => {
+        const pr = d.fix.pr
+          ? `PR #${d.fix.pr.number} ${d.fix.pr.state} (${d.fix.pr.url})`
+          : `fix ${d.fix.status}${d.fix.message ? `: ${d.fix.message}` : ''}`;
+        return `\n  - ${d.provider} ${d.from_version} -> ${d.to_version}: ${d.breaking_count} breaking of ${d.total_count} changes (${d.summary.slice(0, 200)}); ${pr}`;
+      })
+      .join('');
+    return `- ${repo} (branch ${branch ?? 'default'}; code checked out at ${code}): watching ${apis}.${breaking || ' No breaking changes so far.'}`;
+  });
+  return [
+    'API watch, live: this Space watches the APIs these GitHub repos use.',
+    ...lines,
+    "Read a watched repo's code at its path when the owner asks about it. Do not edit files there: Hearth refreshes those copies, and fixes reach a repo only as Hearth's pull requests. Point the owner to the API watch screen to review, comment on or merge a pull request.",
+  ].join('\n');
+}
 export function systemPrompt(input: {
   dot: Dot;
   settings: Settings;
   spaces: Pick<StoredSpace, 'id' | 'name'>[];
   page?: Page;
   review: boolean;
+  /** `apiWatchSection` for this turn, when Hearth-Core answered. */
+  watch?: string;
 }) {
-  const { dot, settings, spaces, page, review } = input;
+  const { dot, settings, spaces, page, review, watch } = input;
   return [
     `You are ${dot.name}: an assistant (a "Dot") in ${settings.name}'s Hearth workspace.`,
     `Role instructions from the owner: ${dot.instructions}`,
     REPLY_FORMAT,
+    watch ?? '',
     `Spaces hold the owner's pages. You may use: ${spaces.map((space) => `${space.name} (id ${space.id})`).join(', ') || 'none'}. Save new pages to ${spaces.find((space) => space.id === dot.spaceId)?.name ?? 'your default Space'} (id ${dot.spaceId}) unless asked otherwise.`,
     review
       ? 'When the owner wants to see a draft before it is saved, call review_space_page once and end your turn; it saves the page only if they approve. After approval, link the page with Markdown using the url from their answer.'
@@ -122,6 +171,18 @@ export function systemPrompt(input: {
   ]
     .filter(Boolean)
     .join('\n');
+}
+/** The Space's API watch for the system prompt; undefined after 3 s or on any error (the turn goes on). */
+async function watchOverview(core: HearthCore) {
+  try {
+    const answer = await Promise.race([
+      core.watchOverview(),
+      new Promise<undefined>((resolve) => setTimeout(resolve, 3000)),
+    ]);
+    return answer?.body;
+  } catch {
+    return undefined;
+  }
 }
 /** A short label for a tool call: the command it ran or the file it touched. */
 export function toolSummary(
@@ -232,7 +293,8 @@ export class HearthAgent extends AbstractAgent {
       const dot = workspace.dot(this.dotId);
       if (!dot) throw new Error('This Dot no longer exists.');
       workspace.requireThread(threadId, dot.id);
-      const settings = store.settings();
+      const owner = await this.deps.ownerOf?.(dot.spaceId);
+      const settings = store.settings(owner);
       if (settings.paused)
         throw new Error('All Dots are paused. Resume them to continue.');
       // The Dot runs in its home Space's container.
@@ -276,6 +338,7 @@ export class HearthAgent extends AbstractAgent {
           spaces: access.spaces(),
           page: access.context(),
           review,
+          watch: apiWatchSection(await watchOverview(core), dot.directory),
         }),
         directory: dot.directory,
         permissions: workspace.computers.permissions(dot.id),
@@ -284,7 +347,7 @@ export class HearthAgent extends AbstractAgent {
         ...(config.model ? { model: config.model } : {}),
       };
       watcher = setInterval(() => {
-        if (store.settings().paused) {
+        if (store.settings(owner).paused) {
           paused = true;
           controller.abort();
         }
